@@ -27,3 +27,8 @@ services:
         value: "1"
       - key: RITMO_MAX_READS
         value: "1"
+      # YouTube em IP de nuvem: o cliente web_embedded não exige PO token e mantém
+      # as qualidades (até 4K). O android_vr cobre vídeos que não permitem incorporação
+      # (nesses, o YouTube costuma limitar a 360p).
+      - key: RITMO_YTDLP_ARGS
+        value: "--extractor-args youtube:player_client=web_embedded,android_vr"

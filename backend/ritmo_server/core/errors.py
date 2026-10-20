@@ -129,7 +129,7 @@ def friendly(text: str) -> tuple[str, str]:
     if has("cookies are no longer valid", "cookie file is no longer valid", "failed to decrypt cookies", "cookies have expired", "cookie expired"):
         return "cookies", "Os cookies do YouTube expiraram. Envie o arquivo de cookies de novo."
     if has("not a bot"):
-        return "bot", "O site pediu verificação de robô. Envie os cookies da sua conta do YouTube no servidor ou tente de novo em alguns minutos."
+        return "bot", "O site pediu verificação de robô. Entre na sua conta em Ajustes › Conta do YouTube (ou use o cookies.txt) e tente de novo."
     if has("private video", "video is private"):
         return "private", "Este vídeo é privado."
     if has("members-only", "join this channel"):

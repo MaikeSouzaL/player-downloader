@@ -42,6 +42,7 @@ def health(svc: Services = Depends(services)) -> dict[str, Any]:
         "node": bool(shutil.which("node")),
         "url": f"http://{lan_ip()}:{svc.settings.port}",
         "auth": bool(svc.settings.api_key),
+        "cookies": svc.cookies.status(),
         "update": svc.updater.info(),
         "queue": svc.registry.snapshot(),
     }

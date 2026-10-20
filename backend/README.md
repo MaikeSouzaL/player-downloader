@@ -87,6 +87,9 @@ download rodando). O histórico aparece no `/health`, e o app tem o botão
 | `GET` | `/jobs?ids=a,b` | vários de uma vez (playlist) |
 | `DELETE` | `/job/{id}` | cancela, ou avisa que o celular já salvou (apaga o temporário) |
 | `GET`/`HEAD` | `/file/{id}` | o arquivo pronto (aceita `Range`, então o download retoma) |
+| `GET` | `/cookies` | status dos cookies do YouTube (nunca mostra o conteúdo) |
+| `POST` | `/cookies` | `{ "cookies": "..." }` → guarda cookies Netscape/cabeçalho na memória |
+| `DELETE` | `/cookies` | esquece os cookies do YouTube |
 
 Tudo pede a chave em `X-Ritmo-Key` (quando `RITMO_KEY` existe), menos `/` e `/file/{id}`:
 o ID do download é aleatório (128 bits) e só quem criou o download com a chave o conhece —
@@ -183,6 +186,44 @@ versão do último deploy) e **5 GB de banda por mês** — passou disso, o Rend
 até o mês seguinte. Dá para música; vídeo acaba rápido. Os relatórios de erro do app também se
 perdem quando ele dorme. E vale o mesmo aviso do YouTube com IP de nuvem (abaixo).
 
+## YouTube em nuvem: cookies da conta (opcional)
+
+IP de datacenter (Render, Oracle) faz o YouTube pedir “confirme que não é um robô”. Trocar o
+cliente ajuda em parte (`RITMO_YTDLP_ARGS=--extractor-args youtube:player_client=web_embedded,android_vr`),
+mas o bloqueio é por IP; o caminho que costuma passar é usar os cookies de uma conta logada.
+
+> **Aviso:** cookies dão acesso total à conta. Use uma conta secundária, nunca a principal. O
+> Google pode bloquear a conta por automação. O servidor guarda os cookies **só na memória**, não
+> os grava em log e apaga o arquivo temporário depois de cada chamada do yt-dlp; ainda assim, quem
+> tiver a chave do servidor pode usá-los.
+
+1. No PC, instale a extensão **Get cookies.txt LOCALLY** (Chrome/Edge/Firefox).
+2. Entre em `youtube.com` numa janela normal (não anônima), com a conta secundária.
+3. Exporte o `cookies.txt` (formato Netscape).
+4. Envie para o servidor (troque o endereço e a chave):
+
+```powershell
+$server = "https://….onrender.com"
+$key = "a-chave-do-RITMO_KEY"
+$cookies = Get-Content "$env:USERPROFILE\Downloads\cookies.txt" -Raw
+Invoke-RestMethod -Uri "$server/cookies" -Method Post -Headers @{ "X-Ritmo-Key" = $key } `
+  -ContentType "application/json" -Body (@{ cookies = $cookies } | ConvertTo-Json)
+```
+
+Confira e, quando quiser, remova:
+
+```powershell
+Invoke-RestMethod -Uri "$server/cookies" -Headers @{ "X-Ritmo-Key" = $key }
+Invoke-RestMethod -Uri "$server/cookies" -Method Delete -Headers @{ "X-Ritmo-Key" = $key }
+```
+
+No Render grátis a memória se perde quando o serviço dorme (15 min sem uso) ou é publicado de novo:
+reenvie o arquivo. O app pode guardar o `cookies.txt` e reenviar sozinho (próxima etapa). O
+`POST /cookies` também aceita o cabeçalho `Cookie: ...` copiado das ferramentas do navegador.
+
+Se ainda aparecer “robô” com cookies válidos, a conta ou o IP foram marcados; tente outra conta ou
+um proxy residencial. Cookies **não** são usados para DRM/assinatura.
+
 ## Nuvem grátis: Oracle Cloud Always Free
 
 A pasta `deploy/` sobe o servidor numa máquina Ubuntu com Docker e HTTPS automático (Caddy +
@@ -209,9 +250,10 @@ Let's Encrypt), e o `deploy.ps1` faz tudo a partir do PC.
 
 Cuidados:
 - **YouTube**: em IP de nuvem ele costuma pedir “confirme que não é um robô”; a atualização
-  automática não resolve isso (os outros sites em geral funcionam). Dá para tentar opções do
-  yt-dlp sem mudar o código: `-YtDlpArgs '--extractor-args youtube:player_client=tv'`, ou um
-  `--proxy`. Se não der, o servidor do PC (acima) continua sendo o melhor para o YouTube.
+  automática não resolve isso (os outros sites em geral funcionam). Dá para tentar o cliente
+  `web_embedded` sem mudar o código (`-YtDlpArgs '--extractor-args youtube:player_client=web_embedded,android_vr'`)
+  e, se ainda pedir robô, enviar os **cookies da conta** (seção acima) ou usar um proxy
+  residencial. Se nada der, o servidor do PC continua sendo o melhor para o YouTube.
 - A Oracle pode **recolher máquina grátis parada** (uso baixo por 7 dias). Passar a conta para
   “Pay As You Go” evita isso e continua sem custo enquanto ficar dentro do Always Free.
 

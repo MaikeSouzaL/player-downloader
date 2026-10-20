@@ -76,6 +76,11 @@ NO_UPDATE_HINTS = (
     "http error 410",
     "login required",
     "requires authentication",
+    "cookies are no longer valid",
+    "cookie file is no longer valid",
+    "the provided youtube account cookies are no longer valid",
+    "failed to decrypt cookies",
+    "cookies have expired",
 )
 
 # Sinais de extrator quebrado ou proteção nova do site: uma versão mais nova costuma resolver.
@@ -121,8 +126,10 @@ def friendly(text: str) -> tuple[str, str]:
     # A idade vem antes: "Sign in to confirm your age" também começa com "sign in to confirm".
     if has("confirm your age", "age-restricted", "inappropriate for some users"):
         return "age", "Este vídeo tem restrição de idade e só abre com login."
+    if has("cookies are no longer valid", "cookie file is no longer valid", "failed to decrypt cookies", "cookies have expired", "cookie expired"):
+        return "cookies", "Os cookies do YouTube expiraram. Envie o arquivo de cookies de novo."
     if has("not a bot"):
-        return "bot", "O site pediu verificação de robô. O servidor tentou se atualizar; tente de novo em alguns minutos ou outro vídeo."
+        return "bot", "O site pediu verificação de robô. Envie os cookies da sua conta do YouTube no servidor ou tente de novo em alguns minutos."
     if has("private video", "video is private"):
         return "private", "Este vídeo é privado."
     if has("members-only", "join this channel"):

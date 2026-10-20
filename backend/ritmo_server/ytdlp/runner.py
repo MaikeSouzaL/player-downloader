@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..config import Settings
+from ..cookies import CookieStore
 from ..core.errors import Cancelled, YtDlpError, last_error
 from .formats import Plan
 from .updater import Updater
@@ -82,11 +83,20 @@ def kill_tree(proc: subprocess.Popen) -> None:
 
 
 class YtDlpRunner:
-    def __init__(self, settings: Settings, updater: Updater, cache_dir: Path, *, python: str = sys.executable) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        updater: Updater,
+        cache_dir: Path,
+        *,
+        python: str = sys.executable,
+        cookies: CookieStore | None = None,
+    ) -> None:
         self.settings = settings
         self.updater = updater
         self.cache_dir = cache_dir
         self.python = python
+        self.cookies = cookies
         self._flags: set[str] = set()
         self._flags_generation = -1
         self._flags_lock = threading.Lock()
@@ -134,7 +144,7 @@ class YtDlpRunner:
                 self._flags_generation = self.updater.generation
             return self._flags
 
-    def base_command(self) -> list[str]:
+    def base_command(self, *, cookies: Path | None = None) -> list[str]:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         cmd = [
             self.python, "-m", "yt_dlp",
@@ -145,22 +155,29 @@ class YtDlpRunner:
         # O YouTube (2025+) exige um runtime JavaScript para os desafios; o Node é o mais fácil de ter no PC.
         if shutil.which("node") and "--js-runtimes" in self.supported_flags():
             cmd += ["--js-runtimes", "node"]
+        if cookies is not None and "--cookies" not in self.settings.ytdlp_args:
+            cmd += ["--cookies", str(cookies)]
         return cmd + list(self.settings.ytdlp_args)
 
     def _json(self, args: list[str], timeout: int) -> dict[str, Any]:
-        with self.updater.running():
-            cmd = self.base_command() + args
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **self._process_kwargs())
-            self._track(proc)
-            try:
-                stdout, stderr = proc.communicate(timeout=timeout)
-            except subprocess.TimeoutExpired as exc:
-                kill_tree(proc)
-                proc.communicate()
-                raise YtDlpError("ERROR: timed out") from exc
-            finally:
-                self._untrack(proc)
-        result = subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+        cookie_file = self.cookies.snapshot() if self.cookies else None
+        try:
+            with self.updater.running():
+                cmd = self.base_command(cookies=cookie_file) + args
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **self._process_kwargs())
+                self._track(proc)
+                try:
+                    stdout, stderr = proc.communicate(timeout=timeout)
+                except subprocess.TimeoutExpired as exc:
+                    kill_tree(proc)
+                    proc.communicate()
+                    raise YtDlpError("ERROR: timed out") from exc
+                finally:
+                    self._untrack(proc)
+            result = subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+        finally:
+            if self.cookies:
+                self.cookies.discard(cookie_file)
         if result.returncode != 0:
             output = (result.stderr or "")[-6000:]
             raise YtDlpError(last_error(output) or "ERROR: falha ao ler o link", output)
@@ -226,9 +243,15 @@ class YtDlpRunner:
             *plan.command_args(with_thumbnail=with_thumbnail),
         ]
         args += ["--load-info-json", source] if from_info else ["--", source]
-        cmd = self.base_command() + args
+        cookie_file = self.cookies.snapshot() if self.cookies else None
+        cmd = self.base_command(cookies=cookie_file) + args
 
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, **self._process_kwargs())
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, **self._process_kwargs())
+        except Exception:
+            if self.cookies:
+                self.cookies.discard(cookie_file)
+            raise
         self._track(proc)
         deadline = time.monotonic() + self.settings.job_timeout
         finished = threading.Event()
@@ -267,6 +290,8 @@ class YtDlpRunner:
             if proc.poll() is None:
                 kill_tree(proc)
             self._untrack(proc)
+            if self.cookies:
+                self.cookies.discard(cookie_file)
         if cancel.is_set():
             raise Cancelled()
         output = "\n".join(tail)

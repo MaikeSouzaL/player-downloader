@@ -1,13 +1,15 @@
-# Sobe o servidor no PC (Windows) e mostra o endereço para colocar no Ritmo.
+﻿# Sobe o servidor no PC (Windows) e mostra o endereço para colocar no Ritmo.
 # Uso:  .\start.ps1                      (porta 8787)
 #       .\start.ps1 -Port 9000 -Key "uma-senha-longa"
 #       .\start.ps1 -Nightly             (usa sempre a versão nightly do yt-dlp)
 #       .\start.ps1 -NoUpdate            (não atualiza o yt-dlp sozinho)
+#       .\start.ps1 -Public              (aberto para a internet por um túnel: chave obrigatória)
 param(
     [int]$Port = 8787,
     [string]$Key = "",
     [switch]$Nightly,
-    [switch]$NoUpdate
+    [switch]$NoUpdate,
+    [switch]$Public
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,6 +22,21 @@ if (-not (Test-Path $python)) {
     py -3.12 -m venv $venv
     & $python -m pip install --upgrade pip
     & $python -m pip install -r (Join-Path $here 'requirements.txt')
+}
+
+if ($Public) {
+    # Sem -Key, usa a chave guardada em ritmo.key (ou cria uma): o app embutido continua valendo.
+    $keyFile = Join-Path $here 'ritmo.key'
+    if (-not $Key -and (Test-Path $keyFile)) { $Key = (Get-Content $keyFile -Raw).Trim() }
+    if (-not $Key) {
+        $bytes = New-Object byte[] 24
+        [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+        $Key = -join ($bytes | ForEach-Object { $_.ToString('x2') })
+        Set-Content -Path $keyFile -Value $Key -Encoding ascii -NoNewline
+        Write-Host "Chave nova criada em $keyFile" -ForegroundColor Green
+    }
+    $env:RITMO_PUBLIC = '1'
+    Write-Host "Modo internet: o app precisa da chave que está em $keyFile." -ForegroundColor Cyan
 }
 
 if ($Key) { $env:RITMO_KEY = $Key }

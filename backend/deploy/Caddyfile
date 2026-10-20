@@ -1,0 +1,7 @@
+# HTTPS automático (Let's Encrypt) no endereço do servidor; tudo vai para o Ritmo.
+{$RITMO_DOMAIN} {
+	reverse_proxy 127.0.0.1:8787 {
+		# Vídeo grande sai na hora, sem esperar encher o buffer.
+		flush_interval -1
+	}
+}

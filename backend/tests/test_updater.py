@@ -1,5 +1,7 @@
 import time
 
+from ritmo_server.config import Settings
+from ritmo_server.ytdlp.runner import YtDlpRunner
 from ritmo_server.ytdlp.updater import Updater
 
 from .conftest import FakePip, make_settings
@@ -88,3 +90,19 @@ def test_atualizacao_espera_os_processos_e_segura_os_novos(tmp_path):
     thread.join(2)
     upd.join(5)
     assert result["changed"] is True and not updater.updating and updater.active == 0
+
+
+def test_opcoes_extras_do_ytdlp_vao_em_toda_chamada(tmp_path, monkeypatch):
+    monkeypatch.setenv("RITMO_YTDLP_ARGS", '--proxy "socks5://10.0.0.2:1080" --extractor-args youtube:player_client=tv')
+    settings = Settings.from_env()
+    assert settings.ytdlp_args == ("--proxy", "socks5://10.0.0.2:1080", "--extractor-args", "youtube:player_client=tv")
+    runner = YtDlpRunner(settings, Updater(settings, python="python", run=lambda *a, **k: None), tmp_path / "cache", python="python")
+    monkeypatch.setattr(runner, "supported_flags", lambda: set())
+    assert runner.base_command()[-4:] == list(settings.ytdlp_args)
+
+
+def test_leituras_simultaneas_vem_do_ambiente(monkeypatch):
+    monkeypatch.setenv("RITMO_MAX_READS", "1")
+    assert Settings.from_env().max_reads == 1
+    monkeypatch.setenv("RITMO_MAX_READS", "50")
+    assert Settings.from_env().max_reads == 8

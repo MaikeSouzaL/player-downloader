@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,6 +56,12 @@ class Settings:
 
     # Links para o próprio PC/rede local (localhost, 192.168…) ficam bloqueados por padrão.
     allow_private_hosts: bool = False
+    # Aberto para a internet (túnel ou VPS): exige chave e nada é liberado só por vir do próprio PC,
+    # porque o túnel entrega os pedidos de fora como se viessem de 127.0.0.1.
+    public: bool = False
+    # Opções a mais para todas as chamadas do yt-dlp (RITMO_YTDLP_ARGS), por exemplo --proxy ou
+    # --extractor-args quando o YouTube implica com o IP da nuvem.
+    ytdlp_args: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -67,8 +74,11 @@ class Settings:
             temp_dir=Path(base).resolve() / "ritmo-downloader",
             log_dir=Path(os.environ["RITMO_LOGS"]).resolve() if os.environ.get("RITMO_LOGS") else cls.log_dir,
             workers=max(1, min(8, _int("RITMO_WORKERS", 2))),
+            max_reads=max(1, min(8, _int("RITMO_MAX_READS", 4))),
             auto_update=_bool("RITMO_AUTO_UPDATE", True),
             update_channel=channel if channel in {"stable", "nightly"} else "stable",
             nightly_fallback=_bool("RITMO_NIGHTLY_FALLBACK", True),
             allow_private_hosts=_bool("RITMO_ALLOW_PRIVATE", False),
+            public=_bool("RITMO_PUBLIC", False),
+            ytdlp_args=tuple(shlex.split(os.environ.get("RITMO_YTDLP_ARGS", ""))),
         )

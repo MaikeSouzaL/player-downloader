@@ -36,10 +36,16 @@ def require_key(request: Request) -> None:
         raise UserError("Chave do servidor inválida.", code="auth", status=401)
 
 
+# Cabeçalhos que túneis e proxies (Tailscale Funnel, Cloudflare Tunnel, nginx) põem no pedido: quem
+# chega por eles vem da internet, mesmo que a conexão saia do próprio PC.
+_PROXY_HEADERS = ("forwarded", "x-forwarded-for", "x-real-ip", "cf-connecting-ip", "tailscale-funnel-request")
+
+
 def require_key_or_local(request: Request) -> None:
     """Páginas para abrir no navegador do próprio PC (sem pôr a chave no endereço)."""
     host = request.client.host if request.client else ""
-    if host in {"127.0.0.1", "::1", "localhost"}:
+    proxied = any(name in request.headers for name in _PROXY_HEADERS)
+    if not request.app.state.services.settings.public and not proxied and host in {"127.0.0.1", "::1", "localhost"}:
         return
     require_key(request)
 

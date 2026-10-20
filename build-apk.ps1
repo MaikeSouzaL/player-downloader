@@ -63,7 +63,12 @@ foreach ($dir in 'src', 'assets', 'plugins', 'tests') {
 }
 Sync (Join-Path $Project 'modules') (Join-Path $BuildDir 'modules') @('/MIR', '/XD', 'build', '.cxx', '.gradle')
 Sync (Join-Path $Project 'android') (Join-Path $BuildDir 'android') @('/MIR', '/XD', 'build', '.cxx', '.gradle', '/XF', 'local.properties')
-Sync $Project $BuildDir @('app.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'babel.config.js', 'metro.config.js', 'index.ts', 'expo-env.d.ts')
+# .env.local = servidor que o app já traz (EXPO_PUBLIC_GRAB_*): se saiu daqui, a cópia antiga não pode sobrar lá.
+foreach ($envFile in '.env', '.env.local') {
+  $copy = Join-Path $BuildDir $envFile
+  if (-not (Test-Path (Join-Path $Project $envFile)) -and (Test-Path $copy)) { Remove-Item $copy }
+}
+Sync $Project $BuildDir @('app.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'babel.config.js', 'metro.config.js', 'index.ts', 'expo-env.d.ts', '.env', '.env.local')
 # node_modules: só copia o que mudou, sem apagar (lá ficam os builds das bibliotecas nativas).
 Sync (Join-Path $Project 'node_modules') (Join-Path $BuildDir 'node_modules') @('/E')
 

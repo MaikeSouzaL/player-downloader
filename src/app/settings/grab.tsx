@@ -9,7 +9,7 @@ import { useT } from '@/i18n';
 import { flushErrorReports } from '@/lib/error-report';
 import { watchGrabQueue } from '@/lib/grab-queue';
 import { errorMessage } from '@/lib/errors';
-import { normalizeServer, testServer, updateServer } from '@/lib/grabber';
+import { DEFAULT_SERVER, normalizeServer, testServer, updateServer } from '@/lib/grabber';
 import { useErrorReports } from '@/store/errorReports';
 import { useSettings } from '@/store/settings';
 import { useUi } from '@/store/ui';
@@ -29,6 +29,8 @@ export default function GrabSettingsScreen() {
   const [key, setKey] = useState(savedKey);
   const [test, setTest] = useState<TestState>({ kind: 'idle' });
   const [updating, setUpdating] = useState(false);
+  // Endereço em branco vale como o servidor que já vem no app (quando o build tem um).
+  const hasServer = !!server.trim() || !!DEFAULT_SERVER;
 
   const runTest = async () => {
     setTest({ kind: 'busy' });
@@ -75,7 +77,7 @@ export default function GrabSettingsScreen() {
 
       <View style={[styles.card, { backgroundColor: colors.surface }]}>
         <Text variant="caption" muted>
-          {tr('tools.grab.hint')}
+          {DEFAULT_SERVER ? tr('tools.grab.defaultServer', { server: DEFAULT_SERVER }) : tr('tools.grab.hint')}
         </Text>
 
         <Text variant="label">{tr('tools.grab.serverLabel')}</Text>
@@ -85,7 +87,7 @@ export default function GrabSettingsScreen() {
             setServer(value);
             setTest({ kind: 'idle' });
           }}
-          placeholder={tr('tools.grab.serverPlaceholder')}
+          placeholder={DEFAULT_SERVER || tr('tools.grab.serverPlaceholder')}
           placeholderTextColor={colors.textMuted}
           autoCapitalize="none"
           autoCorrect={false}
@@ -143,9 +145,9 @@ export default function GrabSettingsScreen() {
         )}
 
         <View style={styles.actions}>
-          <Button label={tr('tools.grab.test')} variant="outline" icon="wifi" onPress={runTest} disabled={!server.trim() || test.kind === 'busy'} />
-          <Button label={tr('tools.grab.save')} icon="check" onPress={save} disabled={!server.trim()} />
-          <Button label={tr('tools.grab.update')} variant="ghost" icon="refresh" onPress={runUpdate} disabled={!server.trim() || updating || test.kind === 'busy'} />
+          <Button label={tr('tools.grab.test')} variant="outline" icon="wifi" onPress={runTest} disabled={!hasServer || test.kind === 'busy'} />
+          <Button label={tr('tools.grab.save')} icon="check" onPress={save} disabled={!hasServer} />
+          <Button label={tr('tools.grab.update')} variant="ghost" icon="refresh" onPress={runUpdate} disabled={!hasServer || updating || test.kind === 'busy'} />
         </View>
       </View>
 

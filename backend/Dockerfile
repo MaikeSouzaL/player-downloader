@@ -20,4 +20,5 @@ ENV PATH="/venv/bin:$PATH" \
     RITMO_TMP=/tmp \
     PORT=8787
 EXPOSE 8787
-CMD ["uvicorn", "ritmo_server.main:app", "--host", "0.0.0.0", "--port", "8787"]
+# A porta vem do PORT (o Render usa 10000); atrás de proxy, FORWARDED_ALLOW_IPS diz em quem confiar.
+CMD ["sh", "-c", "exec uvicorn ritmo_server.main:app --host 0.0.0.0 --port ${PORT:-8787} --proxy-headers"]

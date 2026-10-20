@@ -80,12 +80,27 @@ export function normalizeServer(value: string): string {
   return server.replace(/\/+$/, '');
 }
 
+/**
+ * Servidor que já vem no app (EXPO_PUBLIC_GRAB_SERVER/EXPO_PUBLIC_GRAB_KEY no `.env.local`, lidos no
+ * build). Vale enquanto o endereço em Ajustes estiver em branco.
+ */
+export const DEFAULT_SERVER = normalizeServer(process.env.EXPO_PUBLIC_GRAB_SERVER ?? '');
+const DEFAULT_KEY = (process.env.EXPO_PUBLIC_GRAB_KEY ?? '').trim();
+
+/** Endereço e chave que valem para o que foi digitado (em branco = o servidor do app). */
+export function resolveServer(server: string, key: string): { url: string; key: string } {
+  const url = normalizeServer(server) || DEFAULT_SERVER;
+  // A chave embutida só vai para o servidor embutido: um endereço digitado nunca recebe ela.
+  return { url, key: key.trim() || (url === DEFAULT_SERVER ? DEFAULT_KEY : '') };
+}
+
 export function serverUrl(): string {
-  return normalizeServer(useSettings.getState().grabServer);
+  return resolveServer(useSettings.getState().grabServer, '').url;
 }
 
 export function serverKey(): string {
-  return useSettings.getState().grabKey.trim();
+  const { grabServer, grabKey } = useSettings.getState();
+  return resolveServer(grabServer, grabKey).key;
 }
 
 /** Servidor configurado? Enquanto não estiver, o app continua bloqueando YouTube e redes sociais. */
@@ -151,7 +166,7 @@ export type GrabSearchItem = GrabEntry;
 
 /** Busca no YouTube pelo servidor (a lupa do SnapTube). */
 export function searchVideos(query: string): Promise<{ items: GrabSearchItem[] }> {
-  return call<{ items: GrabSearchItem[] }>(`/search?q=${encodeURIComponent(query)}&limit=15`, {}, 120_000);
+  return call<{ items: GrabSearchItem[] }>(`/search?q=${encodeURIComponent(query)}&limit=15`, {}, 180_000);
 }
 
 /** Cria o download no servidor. Playlist: `entries` com os vídeos escolhidos (vazio = todos). */
@@ -199,20 +214,23 @@ export function serverJobId(url: string): string | null {
 export type ServerHealth = { ytdlp: string; ffmpeg: boolean; node: boolean; version?: string; autoUpdate: boolean };
 
 export async function testServer(server: string, key: string): Promise<ServerHealth> {
+  const target = resolveServer(server, key);
   const data = await request<{ ytdlp?: string; ffmpeg?: boolean; node?: boolean; version?: string; update?: { autoUpdate?: boolean } }>(
-    normalizeServer(server),
-    key.trim(),
+    target.url,
+    target.key,
     '/health',
     {},
-    10_000
+    // Servidor na nuvem (Render grátis) dorme sem uso e leva cerca de 1 minuto para acordar.
+    90_000
   );
   return { ytdlp: data.ytdlp ?? '?', ffmpeg: !!data.ffmpeg, node: !!data.node, version: data.version, autoUpdate: data.update?.autoUpdate !== false };
 }
 
 /** Pede ao servidor para atualizar o yt-dlp agora (pode levar um minuto). */
 export async function updateServer(server: string, key: string): Promise<{ updated: boolean; ytdlp: string }> {
+  const target = resolveServer(server, key);
   try {
-    return await request<{ updated: boolean; ytdlp: string }>(normalizeServer(server), key.trim(), '/update', { method: 'POST' }, 600_000);
+    return await request<{ updated: boolean; ytdlp: string }>(target.url, target.key, '/update', { method: 'POST' }, 600_000);
   } catch (e) {
     throw new Error(errorMessage(e));
   }

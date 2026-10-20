@@ -6,3 +6,5 @@ __pycache__/
 data/
 # Relatórios de erro recebidos do app (podem ter dados do aparelho).
 logs/
+# Chave do modo internet (start.ps1 -Public).
+ritmo.key

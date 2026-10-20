@@ -145,7 +145,7 @@ class YtDlpRunner:
         # O YouTube (2025+) exige um runtime JavaScript para os desafios; o Node é o mais fácil de ter no PC.
         if shutil.which("node") and "--js-runtimes" in self.supported_flags():
             cmd += ["--js-runtimes", "node"]
-        return cmd
+        return cmd + list(self.settings.ytdlp_args)
 
     def _json(self, args: list[str], timeout: int) -> dict[str, Any]:
         with self.updater.running():

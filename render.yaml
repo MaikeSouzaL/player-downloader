@@ -1,0 +1,29 @@
+# Render (plano grátis): o servidor de downloads sobe direto deste repositório.
+# No painel: New › Blueprint › este repositório. Ele pede a RITMO_KEY (a do backend/ritmo.key).
+services:
+  - type: web
+    name: player-downloader
+    runtime: docker
+    plan: free
+    # O mais perto do Brasil entre as regiões do Render.
+    region: virginia
+    dockerfilePath: backend/Dockerfile
+    dockerContext: backend
+    # Só reconstrói quando o servidor muda (mudança no app não gasta minutos de build).
+    buildFilter:
+      paths:
+        - backend/**
+    healthCheckPath: /
+    envVars:
+      - key: RITMO_KEY
+        sync: false
+      - key: RITMO_PUBLIC
+        value: "1"
+      # O proxy do Render é quem conecta; o IP real do celular vem no X-Forwarded-For.
+      - key: FORWARDED_ALLOW_IPS
+        value: "*"
+      # 512 MB e 0,1 de CPU: um download e uma leitura de link por vez.
+      - key: RITMO_WORKERS
+        value: "1"
+      - key: RITMO_MAX_READS
+        value: "1"

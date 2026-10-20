@@ -61,6 +61,8 @@ def create_app(
     """Monta o app. Os testes passam um `runner` falso e `background=False` (sem faxina nem atualização)."""
     _setup_logging()
     settings = settings or Settings.from_env()
+    if settings.public and not settings.api_key:
+        raise RuntimeError("RITMO_PUBLIC=1 exige uma chave (RITMO_KEY): sem ela qualquer pessoa na internet usaria o servidor.")
     svc = Services.build(settings, runner=runner, updater=updater)
 
     @asynccontextmanager
@@ -75,7 +77,8 @@ def create_app(
             print(
                 f"\n  Player Downloader (servidor) {__version__}  http://{lan_ip()}:{settings.port}\n"
                 f"  yt-dlp {version} | ffmpeg: {bool(shutil.which('ffmpeg'))} | node: {bool(shutil.which('node'))}"
-                f" | chave: {'sim' if settings.api_key else 'não'} | autoatualização: {'sim' if settings.auto_update else 'não'}\n"
+                f" | chave: {'sim' if settings.api_key else 'não'} | autoatualização: {'sim' if settings.auto_update else 'não'}"
+                f" | internet: {'sim' if settings.public else 'não'}\n"
                 f"  temporários: {svc.storage.base}\n",
                 flush=True,
             )

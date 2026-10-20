@@ -12,7 +12,7 @@ import { logError } from '@/lib/errorlog';
 import { errorMessage } from '@/lib/errors';
 import { formatBytes, formatDuration } from '@/lib/format';
 import { enqueueGrab } from '@/lib/grab-queue';
-import { normalizeServer, resolveLink, searchVideos, startJob, type GrabEntry, type GrabFormat, type GrabMedia, type GrabSearchItem } from '@/lib/grabber';
+import { resolveLink, resolveServer, searchVideos, startJob, type GrabEntry, type GrabFormat, type GrabMedia, type GrabSearchItem } from '@/lib/grabber';
 import { useGrabHistory } from '@/store/grabHistory';
 import { useSettings } from '@/store/settings';
 import { useUi } from '@/store/ui';
@@ -62,7 +62,7 @@ export default function GrabScreen() {
   const recents = useGrabHistory((s) => s.recents);
   // Assina o endereço: salvar o servidor em Ajustes e voltar já libera a tela.
   const server = useSettings((s) => s.grabServer);
-  const enabled = /^https?:\/\/[^/]+/i.test(normalizeServer(server));
+  const enabled = /^https?:\/\/[^/]+/i.test(resolveServer(server, '').url);
 
   const [link, setLink] = useState(initial);
   const [mode, setMode] = useState<'link' | 'search'>('link');

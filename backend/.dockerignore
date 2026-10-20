@@ -4,3 +4,7 @@ __pycache__
 .pytest_cache
 data
 tests
+deploy
+logs
+ritmo.key
+.env

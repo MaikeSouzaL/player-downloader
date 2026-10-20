@@ -139,12 +139,87 @@ Testes: `pip install -r requirements-dev.txt` e `python -m pytest`.
 | `RITMO_NIGHTLY_FALLBACK` | 1 | se a estável não resolver, tenta a nightly |
 | `RITMO_ALLOW_PRIVATE` | 0 | aceitar links da rede local (NAS etc.) |
 | `RITMO_LOGS` | `backend/logs` | onde guardar os relatórios de erro do app |
+| `RITMO_PUBLIC` | 0 | aberto para a internet: exige `RITMO_KEY` e o `/logs/view` deixa de abrir sem chave no próprio PC |
+| `RITMO_YTDLP_ARGS` | vazio | opções a mais em toda chamada do yt-dlp (ex.: `--proxy …`) |
+| `RITMO_MAX_READS` | 4 | leituras de link (`/resolve`, `/search`) ao mesmo tempo |
 
-## VPS com Docker
+## Usar de fora de casa (grátis): PC + Tailscale Funnel
+
+O servidor continua no PC (IP de casa: o YouTube bloqueia bem menos que IP de nuvem) e o
+Tailscale Funnel dá um endereço `https://…ts.net` fixo, com certificado, sem abrir porta no roteador.
+
+1. Crie a conta em tailscale.com (login com Google/GitHub/Microsoft) e instale o Tailscale no PC.
+2. No painel do Tailscale, ative **HTTPS** (DNS › HTTPS Certificates) e o **Funnel** para este PC.
+3. Suba o servidor no modo internet (cria a chave em `backend/ritmo.key` na primeira vez):
+   ```powershell
+   .\start.ps1 -Public
+   ```
+4. Em outro terminal, publique a porta (fica ligado mesmo fechando o terminal):
+   ```powershell
+   tailscale funnel --bg 8787
+   tailscale funnel status   # mostra o endereço https://<pc>.<rede>.ts.net
+   ```
+5. No app: em `ritmo/.env.local` (modelo em `.env.example`) ponha o endereço e a chave e gere o
+   APK/IPA de novo — o app já sai apontando para o servidor. Ou digite os dois em Ajustes › Servidor.
+
+Para abrir o painel de erros pela internet: `https://<pc>.<rede>.ts.net/logs/view?k=<chave>`.
+Limites: o PC precisa ficar ligado; o Funnel tem limite de banda (não divulgado) e o plano grátis
+é para uso pessoal. Se só você usa, dá até para não publicar: instale o Tailscale no celular e use
+o endereço `http://<pc>:8787` da sua rede Tailscale.
+
+## Nuvem grátis sem cartão: Render
+
+O `render.yaml` na raiz do repositório descreve o serviço (Docker, plano grátis, região Virgínia).
+
+1. Crie a conta em render.com entrando com o GitHub e dê acesso ao repositório `player-downloader`.
+2. New › **Blueprint** › escolha o repositório. Ele pede a `RITMO_KEY`: cole a do `backend/ritmo.key`.
+3. Quando o deploy terminar, copie o endereço `https://….onrender.com` e ponha em `ritmo/.env.local`
+   (`EXPO_PUBLIC_GRAB_SERVER`, com a chave em `EXPO_PUBLIC_GRAB_KEY`) antes de gerar o APK/IPA.
+
+Cada push que mexe em `backend/` publica de novo sozinho. Limites do plano grátis: 512 MB e 0,1 de
+CPU (um download por vez, e devagar), dorme depois de 15 min sem uso e leva cerca de 1 minuto para
+acordar, disco que se apaga ao dormir (as atualizações do yt-dlp se perdem e a imagem volta à
+versão do último deploy) e **5 GB de banda por mês** — passou disso, o Render suspende o serviço
+até o mês seguinte. Dá para música; vídeo acaba rápido. Os relatórios de erro do app também se
+perdem quando ele dorme. E vale o mesmo aviso do YouTube com IP de nuvem (abaixo).
+
+## Nuvem grátis: Oracle Cloud Always Free
+
+A pasta `deploy/` sobe o servidor numa máquina Ubuntu com Docker e HTTPS automático (Caddy +
+Let's Encrypt), e o `deploy.ps1` faz tudo a partir do PC.
+
+1. **Conta** em oracle.com/cloud/free (pede cartão só para conferir; escolha a região de casa
+   com cuidado — São Paulo ou Vinhedo —, ela não muda depois).
+2. **Máquina**: Compute › Instances › Create. Imagem **Ubuntu 24.04**, forma **Ampere
+   VM.Standard.A1.Flex** com o que o Always Free deixar (hoje 2 OCPU / 12 GB). Se der “Out of
+   capacity”, tente outro domínio de disponibilidade ou mais tarde; a E2.1.Micro (1 GB) também
+   funciona, só que bem mais lenta. Em SSH, “Gerar par de chaves” e **salve a chave privada**
+   (por exemplo em `%USERPROFILE%\.ssh\oracle-ritmo.key`). Anote o **IP público**.
+3. **Portas**: Networking › Virtual Cloud Networks › a rede › Security Lists › Add Ingress Rules:
+   origem `0.0.0.0/0`, TCP, portas `80,443`.
+4. **Nome com HTTPS**: em duckdns.org crie um subdomínio (ex.: `meuplayer.duckdns.org`) e ponha
+   nele o IP público da máquina.
+5. **Envio** (no PC):
+   ```powershell
+   .\deploy\deploy.ps1 -Server <IP> -KeyFile "$env:USERPROFILE\.ssh\oracle-ritmo.key" -Domain meuplayer.duckdns.org
+   ```
+   Ele instala Docker e firewall, sobe com HTTPS, usa a chave de `ritmo.key` e grava endereço e
+   chave em `ritmo/.env.local` — o próximo APK/IPA já sai apontando para a nuvem. Rodar de novo
+   atualiza o servidor (a chave e os relatórios de erro ficam em `/opt/ritmo` na máquina).
+
+Cuidados:
+- **YouTube**: em IP de nuvem ele costuma pedir “confirme que não é um robô”; a atualização
+  automática não resolve isso (os outros sites em geral funcionam). Dá para tentar opções do
+  yt-dlp sem mudar o código: `-YtDlpArgs '--extractor-args youtube:player_client=tv'`, ou um
+  `--proxy`. Se não der, o servidor do PC (acima) continua sendo o melhor para o YouTube.
+- A Oracle pode **recolher máquina grátis parada** (uso baixo por 7 dias). Passar a conta para
+  “Pay As You Go” evita isso e continua sem custo enquanto ficar dentro do Always Free.
+
+Em outra VPS qualquer, sem o script:
 
 ```bash
 docker build -t ritmo-downloader .
-docker run -d --name ritmo-downloader -p 8787:8787 -e RITMO_KEY="uma-senha-longa" \
+docker run -d --name ritmo-downloader -p 8787:8787 -e RITMO_KEY="uma-senha-longa" -e RITMO_PUBLIC=1 \
   --restart unless-stopped ritmo-downloader
 ```
 

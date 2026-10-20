@@ -1,0 +1,42 @@
+# Servidor na nuvem: o Ritmo atrás do Caddy, que tira e renova o certificado HTTPS sozinho.
+# Quem sobe é o install.sh:  docker compose --env-file /opt/ritmo/.env up -d --build
+#
+# Os dois usam a rede do host: o firewall da imagem da Oracle bloqueia o encaminhamento do Docker,
+# e assim a porta 8787 escuta só em 127.0.0.1 (de fora, só o Caddy nas portas 80 e 443).
+name: ritmo
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+services:
+  ritmo:
+    # Build também na rede do host (pip e apt sem depender do encaminhamento do Docker).
+    build: { context: .., network: host }
+    restart: unless-stopped
+    network_mode: host
+    env_file: /opt/ritmo/.env
+    environment:
+      RITMO_PUBLIC: "1"
+    volumes:
+      # Relatórios de erro do app: ficam fora do contêiner para sobreviver às atualizações.
+      - /opt/ritmo/logs:/app/logs
+    command: ["uvicorn", "ritmo_server.main:app", "--host", "127.0.0.1", "--port", "8787", "--proxy-headers"]
+    logging: *logging
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    network_mode: host
+    depends_on: [ritmo]
+    environment:
+      RITMO_DOMAIN: ${RITMO_DOMAIN:?defina RITMO_DOMAIN no /opt/ritmo/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging: *logging
+
+volumes:
+  caddy_data:
+  caddy_config:

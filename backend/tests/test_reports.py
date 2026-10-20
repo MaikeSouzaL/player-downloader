@@ -1,5 +1,8 @@
 import json
 
+import pytest
+from starlette.testclient import TestClient
+
 from ritmo_server.reports import ErrorReports, fingerprint
 
 from .conftest import wait_for, yt_error
@@ -73,3 +76,23 @@ def test_falha_sem_explicacao_do_servidor_vai_para_o_relatorio(make_client, runn
 def test_impressao_digital_ignora_numeros_e_links():
     assert fingerprint("A", "falhou em https://x.com/1 código 403") == fingerprint("A", "falhou em https://y.com/2 código 500")
     assert fingerprint("A", "falhou") != fingerprint("B", "falhou")
+
+
+def test_logs_view_so_dispensa_a_chave_no_proprio_pc_sem_tunel(make_client):
+    client = make_client(api_key="k")
+    local = TestClient(client.app, client=("127.0.0.1", 50000))
+    assert local.get("/logs/view").status_code == 200
+    # Pelo túnel (Tailscale Funnel, Cloudflare) o pedido também sai de 127.0.0.1, mas vem com cabeçalho de proxy.
+    assert local.get("/logs/view", headers={"X-Forwarded-For": "203.0.113.9"}).status_code == 401
+    assert local.get("/logs/view", headers={"Tailscale-Funnel-Request": "?1"}).status_code == 401
+    assert TestClient(client.app, client=("203.0.113.9", 50000)).get("/logs/view").status_code == 401
+
+
+def test_modo_internet_exige_chave_ate_no_proprio_pc(make_client):
+    with pytest.raises(RuntimeError, match="RITMO_KEY"):
+        make_client(public=True)
+    client = make_client(api_key="k", public=True)
+    local = TestClient(client.app, client=("127.0.0.1", 50000))
+    assert local.get("/logs/view").status_code == 401
+    assert local.get("/logs/view", params={"k": "k"}).status_code == 200
+    assert local.get("/health").status_code == 401

@@ -1,0 +1,56 @@
+# O EAS usa este arquivo NO LUGAR dos .gitignore (inclusive os das subpastas).
+# Igual ao .gitignore, com duas diferenças: o .env.local vai junto (endereço e chave do
+# servidor embutidos no app) e a pasta backend/ fica de fora (o build do iPhone não usa).
+
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+
+# typescript
+*.tsbuildinfo
+
+example
+
+# generated native folders
+/ios
+/android
+
+# build do módulo nativo (Gradle) e pacotes gerados
+modules/*/android/build/
+modules/*/android/.gradle/
+modules/*/android/.cxx/
+*.apk
+*.aab
+*.ipa
+
+# servidor (não entra no app)
+backend/

@@ -85,7 +85,8 @@ function withDisplayName(config) {
     for (const ref of list?.buildConfigurations ?? []) {
       const settings = configurations[ref.value]?.buildSettings;
       if (!settings) continue;
-      settings.INFOPLIST_KEY_CFBundleDisplayName = 'Player Downloader';
+      // Entre aspas: no project.pbxproj um valor com espaço sem aspas quebra o CocoaPods.
+      settings.INFOPLIST_KEY_CFBundleDisplayName = '"Player Downloader"';
       settings.SWIFT_VERSION = '5.0';
     }
     return cfg;

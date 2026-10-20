@@ -45,6 +45,8 @@ class Job:
     source_url: str
     title: str
     subtitles: str | None = None
+    # Cookies do aparelho; só em memória enquanto o job existe. Nunca vão para o `public()`.
+    cookies: str | None = None
     info_file: Path | None = None
     entry_id: str | None = None
     batch_id: str | None = None

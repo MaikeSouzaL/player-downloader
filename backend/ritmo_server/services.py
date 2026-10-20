@@ -6,7 +6,7 @@ import threading
 from dataclasses import dataclass, field
 
 from .config import Settings
-from .cookies import CookieStore
+from .cookies import CookieJar
 from .jobs.janitor import Janitor
 from .jobs.registry import Registry
 from .jobs.storage import TempStorage
@@ -26,14 +26,14 @@ class Services:
     pool: WorkerPool
     janitor: Janitor
     reports: ErrorReports
-    cookies: CookieStore
+    cookies: CookieJar
     reads: threading.BoundedSemaphore = field(default_factory=lambda: threading.BoundedSemaphore(4))
 
     @classmethod
     def build(cls, settings: Settings, *, runner: YtDlpRunner | None = None, updater: Updater | None = None) -> "Services":
         storage = TempStorage(settings.temp_dir)
         updater = updater or Updater(settings)
-        cookies = CookieStore(storage.base / "cookies")
+        cookies = CookieJar(storage.base / "cookies")
         runner = runner or YtDlpRunner(settings, updater, storage.cache, cookies=cookies)
         registry = Registry(settings, storage)
         reports = ErrorReports(settings.log_dir)

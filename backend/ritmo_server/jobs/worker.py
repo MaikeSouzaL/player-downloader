@@ -82,7 +82,10 @@ class WorkerPool:
             if job_id is None:
                 return
             job = self.registry.get(job_id)
-            if job is None or job.cancel.is_set():
+            if job is None:
+                continue
+            if job.cancel.is_set():
+                job.cookies = None
                 continue
             try:
                 self.run(job)
@@ -91,6 +94,9 @@ class WorkerPool:
                 self._report(f"{type(exc).__name__}: {exc}", job, source="Servidor: exceção")
                 self.registry.update(job.id, status=ERROR, stage="Falhou", error="Falha inesperada no servidor.", code="internal")
                 self.storage.remove_job(job.id)
+            finally:
+                # Os cookies vieram do aparelho e só valem para este job.
+                job.cookies = None
 
     def _report(self, message: str, job: Job, *, source: str = "Servidor: download", output: str | None = None) -> None:
         if self.reports is None:
@@ -146,6 +152,7 @@ class WorkerPool:
                     on_progress=self._progress(job),
                     cancel=job.cancel,
                     with_thumbnail=with_thumbnail,
+                    cookies=job.cookies,
                 )
                 break
             except Cancelled:

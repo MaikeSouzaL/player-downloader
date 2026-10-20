@@ -1,20 +1,18 @@
 """
-Cookies do YouTube enviados pelo usuário.
+Cookies do YouTube que o app manda junto de cada pedido.
 
-Ficam **só na memória** do processo: nada é gravado de forma permanente e o arquivo temporário
-usado pelo yt-dlp é apagado assim que cada chamada termina. No Render (plano grátis) isso significa
-reenviar os cookies depois que o serviço dormir; o app pode guardar o arquivo e reenviar sozinho.
+O servidor **não guarda cookies**: valida o texto, escreve um arquivo temporário só para aquela
+chamada do yt-dlp e apaga no fim. Cada job leva o seu próprio conjunto (o `cookies` vem do app na
+hora do download), então vários usuários podem usar o mesmo servidor sem misturar contas.
 
 Formatos aceitos:
-  - Netscape cookies.txt (o do extensão "Get cookies.txt LOCALLY");
+  - Netscape cookies.txt (o da extensão "Get cookies.txt LOCALLY");
   - o cabeçalho `Cookie: nome=valor; ...` copiado das ferramentas do navegador.
 """
 
 from __future__ import annotations
 
 import re
-import threading
-import time
 import uuid
 from pathlib import Path
 
@@ -67,7 +65,7 @@ def _header_lines(text: str) -> list[tuple[str, str, str]]:
 
 def _normalize(text: str) -> tuple[str, int]:
     if not text or not text.strip():
-        raise UserError("Envie o arquivo de cookies do YouTube.", code="cookies", status=400)
+        raise UserError("Envie os cookies do YouTube.", code="cookies", status=400)
     if len(text.encode("utf-8")) > MAX_BYTES:
         raise UserError("O arquivo de cookies é grande demais.", code="cookies", status=400)
 
@@ -90,51 +88,26 @@ def _normalize(text: str) -> tuple[str, int]:
     return normalized, len(cookies)
 
 
-class CookieStore:
-    """Um único conjunto de cookies por servidor (o servidor é pessoal)."""
+class CookieJar:
+    """Cookies de um pedido/job. Não mantém texto em memória nem arquivo permanente."""
 
     def __init__(self, base: Path) -> None:
         self.base = base
-        self._lock = threading.Lock()
-        self._text = ""
-        self._count = 0
-        self._updated = 0.0
 
-    def save(self, text: str) -> dict[str, object]:
-        normalized, count = _normalize(text or "")
-        with self._lock:
-            self._text = normalized
-            self._count = count
-            self._updated = time.time()
-        return self.status()
+    def validate(self, text: str) -> None:
+        _normalize(text or "")
 
-    def status(self) -> dict[str, object]:
-        with self._lock:
-            return {
-                "configured": bool(self._text),
-                "count": self._count,
-                "updatedAt": int(self._updated) if self._updated else None,
-            }
-
-    def clear(self) -> None:
-        with self._lock:
-            self._text = ""
-            self._count = 0
-            self._updated = 0.0
-
-    def snapshot(self) -> Path | None:
-        """Arquivo temporário só para uma chamada do yt-dlp; quem chamou deve apagar."""
-        with self._lock:
-            if not self._text:
-                return None
-            self.base.mkdir(parents=True, exist_ok=True)
-            path = self.base / f"{uuid.uuid4().hex}.txt"
-            path.write_text(self._text, encoding="utf-8")
-            try:
-                path.chmod(0o600)
-            except OSError:
-                pass  # Windows: o diretório temporário já é do usuário
-            return path
+    def write(self, text: str) -> Path:
+        """Um arquivo por chamada do yt-dlp; quem chamou apaga com `discard`."""
+        normalized, _ = _normalize(text or "")
+        self.base.mkdir(parents=True, exist_ok=True)
+        path = self.base / f"{uuid.uuid4().hex}.txt"
+        path.write_text(normalized, encoding="utf-8")
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass  # Windows: o diretório temporário já é do usuário
+        return path
 
     @staticmethod
     def discard(path: Path | None) -> None:

@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..config import Settings
-from ..cookies import CookieStore
+from ..cookies import CookieJar
 from ..core.errors import Cancelled, YtDlpError, last_error
 from .formats import Plan
 from .updater import Updater
@@ -90,7 +90,7 @@ class YtDlpRunner:
         cache_dir: Path,
         *,
         python: str = sys.executable,
-        cookies: CookieStore | None = None,
+        cookies: CookieJar | None = None,
     ) -> None:
         self.settings = settings
         self.updater = updater
@@ -159,25 +159,20 @@ class YtDlpRunner:
             cmd += ["--cookies", str(cookies)]
         return cmd + list(self.settings.ytdlp_args)
 
-    def _json(self, args: list[str], timeout: int) -> dict[str, Any]:
-        cookie_file = self.cookies.snapshot() if self.cookies else None
-        try:
-            with self.updater.running():
-                cmd = self.base_command(cookies=cookie_file) + args
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **self._process_kwargs())
-                self._track(proc)
-                try:
-                    stdout, stderr = proc.communicate(timeout=timeout)
-                except subprocess.TimeoutExpired as exc:
-                    kill_tree(proc)
-                    proc.communicate()
-                    raise YtDlpError("ERROR: timed out") from exc
-                finally:
-                    self._untrack(proc)
-            result = subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
-        finally:
-            if self.cookies:
-                self.cookies.discard(cookie_file)
+    def _json(self, args: list[str], timeout: int, *, cookies: Path | None = None) -> dict[str, Any]:
+        with self.updater.running():
+            cmd = self.base_command(cookies=cookies) + args
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **self._process_kwargs())
+            self._track(proc)
+            try:
+                stdout, stderr = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired as exc:
+                kill_tree(proc)
+                proc.communicate()
+                raise YtDlpError("ERROR: timed out") from exc
+            finally:
+                self._untrack(proc)
+        result = subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
         if result.returncode != 0:
             output = (result.stderr or "")[-6000:]
             raise YtDlpError(last_error(output) or "ERROR: falha ao ler o link", output)
@@ -191,17 +186,27 @@ class YtDlpRunner:
 
     # ------------------------------------------------------------------ leitura
 
-    def extract(self, url: str, *, playlist: bool = False) -> dict[str, Any]:
+    def extract(self, url: str, *, playlist: bool = False, cookies: str | None = None) -> dict[str, Any]:
         """
         Metadados. Sem `playlist`, um link de vídeo dentro de playlist (watch?v=…&list=…) devolve só o
         vídeo; um link que é só playlist devolve a lista "rasa" (rápida, sem os formatos de cada vídeo).
         """
         args = ["-J", "--flat-playlist", "--playlist-items", f"1:{self.settings.playlist_limit}"]
         args.append("--yes-playlist" if playlist else "--no-playlist")
-        return self._json(args + ["--", url], self.settings.resolve_timeout)
+        cookie_file = self.cookies.write(cookies) if (self.cookies and cookies) else None
+        try:
+            return self._json(args + ["--", url], self.settings.resolve_timeout, cookies=cookie_file)
+        finally:
+            if self.cookies:
+                self.cookies.discard(cookie_file)
 
-    def search(self, query: str, limit: int) -> dict[str, Any]:
-        return self._json(["-J", "--flat-playlist", "--", f"ytsearch{limit}:{query}"], self.settings.resolve_timeout)
+    def search(self, query: str, limit: int, *, cookies: str | None = None) -> dict[str, Any]:
+        cookie_file = self.cookies.write(cookies) if (self.cookies and cookies) else None
+        try:
+            return self._json(["-J", "--flat-playlist", "--", f"ytsearch{limit}:{query}"], self.settings.resolve_timeout, cookies=cookie_file)
+        finally:
+            if self.cookies:
+                self.cookies.discard(cookie_file)
 
     # ------------------------------------------------------------------ download
 
@@ -215,10 +220,16 @@ class YtDlpRunner:
         on_progress: Callable[[Progress], None],
         cancel: threading.Event,
         with_thumbnail: bool = True,
+        cookies: str | None = None,
     ) -> Path | None:
         """Baixa (e junta/converte) para `out_dir`. Devolve o arquivo final, se o yt-dlp informou."""
-        with self.updater.running():
-            return self._download(source, from_info, plan, out_dir, on_progress, cancel, with_thumbnail)
+        cookie_file = self.cookies.write(cookies) if (self.cookies and cookies) else None
+        try:
+            with self.updater.running():
+                return self._download(source, from_info, plan, out_dir, on_progress, cancel, with_thumbnail, cookie_file)
+        finally:
+            if self.cookies:
+                self.cookies.discard(cookie_file)
 
     def _download(
         self,
@@ -229,6 +240,7 @@ class YtDlpRunner:
         on_progress: Callable[[Progress], None],
         cancel: threading.Event,
         with_thumbnail: bool,
+        cookies: Path | None = None,
     ) -> Path | None:
         out_dir.mkdir(parents=True, exist_ok=True)
         args = [
@@ -243,15 +255,9 @@ class YtDlpRunner:
             *plan.command_args(with_thumbnail=with_thumbnail),
         ]
         args += ["--load-info-json", source] if from_info else ["--", source]
-        cookie_file = self.cookies.snapshot() if self.cookies else None
-        cmd = self.base_command(cookies=cookie_file) + args
+        cmd = self.base_command(cookies=cookies) + args
 
-        try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, **self._process_kwargs())
-        except Exception:
-            if self.cookies:
-                self.cookies.discard(cookie_file)
-            raise
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, **self._process_kwargs())
         self._track(proc)
         deadline = time.monotonic() + self.settings.job_timeout
         finished = threading.Event()
@@ -290,8 +296,6 @@ class YtDlpRunner:
             if proc.poll() is None:
                 kill_tree(proc)
             self._untrack(proc)
-            if self.cookies:
-                self.cookies.discard(cookie_file)
         if cancel.is_set():
             raise Cancelled()
         output = "\n".join(tail)

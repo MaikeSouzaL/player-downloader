@@ -22,6 +22,8 @@ router = APIRouter(dependencies=[Depends(require_key)])
 @router.post("/download")
 def download(body: DownloadBody, svc: Services = Depends(services)) -> dict[str, Any]:
     resolved = svc.registry.get_resolved(body.token)
+    if body.cookies:
+        svc.cookies.validate(body.cookies)
     playlist = resolved.kind == "playlist"
     plan = plan_for(body.formatId, options=resolved.options, subtitles=body.subtitles, playlist=playlist)
 
@@ -29,6 +31,7 @@ def download(body: DownloadBody, svc: Services = Depends(services)) -> dict[str,
         job = Job(
             id=uuid.uuid4().hex, token=resolved.token, format_id=body.formatId, plan=plan,
             source_url=resolved.url, title=resolved.title, subtitles=body.subtitles, info_file=resolved.info_file,
+            cookies=body.cookies,
         )
         svc.registry.add_jobs([job])
         svc.pool.submit(job.id)
@@ -54,6 +57,7 @@ def download(body: DownloadBody, svc: Services = Depends(services)) -> dict[str,
             Job(
                 id=uuid.uuid4().hex, token=resolved.token, format_id=body.formatId, plan=plan,
                 source_url=source, title=item["title"], subtitles=body.subtitles, entry_id=entry, batch_id=batch_id,
+                cookies=body.cookies,
             )
         )
     if not jobs:

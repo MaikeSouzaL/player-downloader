@@ -60,19 +60,23 @@ class FakeRunner:
         self.extract_errors: list[Exception] = []
         self.download_errors: list[Exception] = []
         self.calls: list[dict[str, Any]] = []
+        self.cookies_seen: list[str | None] = []
         self.block = threading.Event()  # set = o download fica parado até cancelar
         self.started = threading.Event()
 
-    def extract(self, url: str, *, playlist: bool = False) -> dict[str, Any]:
+    def extract(self, url: str, *, playlist: bool = False, cookies: str | None = None) -> dict[str, Any]:
+        self.cookies_seen.append(cookies)
         if self.extract_errors:
             raise self.extract_errors.pop(0)
         return PLAYLIST_INFO if (playlist or "playlist" in url) else VIDEO_INFO
 
-    def search(self, query: str, limit: int) -> dict[str, Any]:
+    def search(self, query: str, limit: int, *, cookies: str | None = None) -> dict[str, Any]:
+        self.cookies_seen.append(cookies)
         return {"_type": "playlist", "entries": PLAYLIST_INFO["entries"][:limit]}
 
     def download(self, *, source: str, from_info: bool, plan: Plan, out_dir: Path, on_progress: Callable[[Progress], None],
-                 cancel: threading.Event, with_thumbnail: bool = True) -> Path | None:
+                 cancel: threading.Event, with_thumbnail: bool = True, cookies: str | None = None) -> Path | None:
+        self.cookies_seen.append(cookies)
         self.calls.append({"source": source, "from_info": from_info, "plan": plan, "with_thumbnail": with_thumbnail})
         self.started.set()
         if self.block.is_set():

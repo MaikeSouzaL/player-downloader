@@ -51,6 +51,9 @@ e toque em **Testar conexão**. O celular e o PC precisam estar na mesma rede Wi
   avisa que a porta está em uso e não sobe.
 - A única coisa guardada de propósito são os **relatórios de erro** do app, em `backend/logs/`
   (com rodízio: até ~30 MB).
+- **Cookies do YouTube nunca são gravados.** O app manda uma cópia junto de cada `/resolve` e
+  `/download`; o servidor usa num arquivo temporário só para aquela chamada do yt-dlp e apaga no
+  fim. O job guarda o texto em memória apenas enquanto baixa e o descarta ao terminar.
 
 ## Atualização automática do yt-dlp
 
@@ -80,16 +83,14 @@ download rodando). O histórico aparece no `/health`, e o app tem o botão
 | `GET` | `/` | status rápido (versões, FFmpeg) |
 | `GET` | `/health` | o que o “Testar conexão” usa; inclui a fila e as atualizações |
 | `POST` | `/update` | atualiza o yt-dlp agora |
-| `POST` | `/resolve` | `{ "url", "playlist"? }` → vídeo (qualidades, áudio, legendas) ou playlist (lista de vídeos) |
-| `GET` | `/search?q=&limit=` | busca no YouTube (a “lupa” do SnapTube) |
-| `POST` | `/download` | `{ "token", "formatId", "subtitles"?, "entries"? }` → `{ "id", "ids" }` |
+| `POST` | `/resolve` | `{ "url", "playlist"?, "cookies"? }` → vídeo (qualidades, áudio, legendas) ou playlist (lista de vídeos) |
+| `GET` | `/search?q=&limit=` | busca no YouTube sem cookies (compatibilidade) |
+| `POST` | `/search` | `{ "q", "limit"?, "cookies"? }` → busca no YouTube (a “lupa” do SnapTube) |
+| `POST` | `/download` | `{ "token", "formatId", "subtitles"?, "entries"?, "cookies"? }` → `{ "id", "ids" }` |
 | `GET` | `/job/{id}` | `queued`, `downloading`, `converting`, `ready`, `error`, `cancelled` + progresso |
 | `GET` | `/jobs?ids=a,b` | vários de uma vez (playlist) |
 | `DELETE` | `/job/{id}` | cancela, ou avisa que o celular já salvou (apaga o temporário) |
 | `GET`/`HEAD` | `/file/{id}` | o arquivo pronto (aceita `Range`, então o download retoma) |
-| `GET` | `/cookies` | status dos cookies do YouTube (nunca mostra o conteúdo) |
-| `POST` | `/cookies` | `{ "cookies": "..." }` → guarda cookies Netscape/cabeçalho na memória |
-| `DELETE` | `/cookies` | esquece os cookies do YouTube |
 
 Tudo pede a chave em `X-Ritmo-Key` (quando `RITMO_KEY` existe), menos `/` e `/file/{id}`:
 o ID do download é aleatório (128 bits) e só quem criou o download com a chave o conhece —
@@ -192,37 +193,36 @@ IP de datacenter (Render, Oracle) faz o YouTube pedir “confirme que não é um
 cliente ajuda em parte (`RITMO_YTDLP_ARGS=--extractor-args youtube:player_client=web_embedded,android_vr`),
 mas o bloqueio é por IP; o caminho que costuma passar é usar os cookies de uma conta logada.
 
-> **Aviso:** cookies dão acesso total à conta. Use uma conta secundária, nunca a principal. O
-> Google pode bloquear a conta por automação. O servidor guarda os cookies **só na memória**, não
-> os grava em log e apaga o arquivo temporário depois de cada chamada do yt-dlp; ainda assim, quem
-> tiver a chave do servidor pode usá-los.
+**O servidor não guarda cookies.** O app guarda o `cookies.txt` no aparelho e manda uma cópia em
+cada `/resolve` e `/download`; o servidor usa num arquivo temporário e apaga no fim. Cada job leva
+o seu próprio conjunto, então **várias pessoas podem usar o mesmo servidor sem misturar contas**.
+No Render grátis pode dormir à vontade: o app reenvia na próxima operação.
 
-1. No PC, instale a extensão **Get cookies.txt LOCALLY** (Chrome/Edge/Firefox).
-2. Entre em `youtube.com` numa janela normal (não anônima), com a conta secundária.
-3. Exporte o `cookies.txt` (formato Netscape).
-4. Envie para o servidor (troque o endereço e a chave):
+No app: **Ajustes › Conta do YouTube** → login no WebView (ou colar o `cookies.txt`). O arquivo
+fica na área privada do app e é reenviado a cada download.
+
+> **Aviso:** cookies dão acesso total à conta. Use uma conta secundária, nunca a principal. O
+> Google pode bloquear a conta por automação. O servidor vê os cookies em memória durante o
+> download (não tem como usar sem eles), mas não os grava em log nem em disco; quem tiver a chave
+> do servidor ainda pode interceptá-los no pedido.
+
+Para testar sem o app (troque endereço e chave):
 
 ```powershell
 $server = "https://….onrender.com"
 $key = "a-chave-do-RITMO_KEY"
 $cookies = Get-Content "$env:USERPROFILE\Downloads\cookies.txt" -Raw
-Invoke-RestMethod -Uri "$server/cookies" -Method Post -Headers @{ "X-Ritmo-Key" = $key } `
-  -ContentType "application/json" -Body (@{ cookies = $cookies } | ConvertTo-Json)
+$body = @{ url = "https://www.youtube.com/watch?v=jNQXAC9IVRw"; cookies = $cookies } | ConvertTo-Json
+Invoke-RestMethod -Uri "$server/resolve" -Method Post -Headers @{ "X-Ritmo-Key" = $key } `
+  -ContentType "application/json" -Body $body
 ```
 
-Confira e, quando quiser, remova:
-
-```powershell
-Invoke-RestMethod -Uri "$server/cookies" -Headers @{ "X-Ritmo-Key" = $key }
-Invoke-RestMethod -Uri "$server/cookies" -Method Delete -Headers @{ "X-Ritmo-Key" = $key }
-```
-
-No Render grátis a memória se perde quando o serviço dorme (15 min sem uso) ou é publicado de novo:
-reenvie o arquivo. O app pode guardar o `cookies.txt` e reenviar sozinho (próxima etapa). O
-`POST /cookies` também aceita o cabeçalho `Cookie: ...` copiado das ferramentas do navegador.
+O `/download` também precisa do mesmo campo `cookies` (o app manda). O `cookies.txt` Netscape e o
+cabeçalho `Cookie: ...` são aceitos.
 
 Se ainda aparecer “robô” com cookies válidos, a conta ou o IP foram marcados; tente outra conta ou
-um proxy residencial. Cookies **não** são usados para DRM/assinatura.
+um proxy residencial. Cookies **não** são usados para DRM/assinatura. A chave do servidor ainda é
+compartilhada; para um grupo pequeno, cada pessoa pode usar a própria chave (ou o próprio servidor).
 
 ## Nuvem grátis: Oracle Cloud Always Free
 
@@ -272,9 +272,10 @@ no iOS o `NSAllowsLocalNetworking` só existem para o modo PC na mesma rede).
 
 ## Limites e cuidados
 
-- Só conteúdo público: **não** há login, cookies, DRM nem burla de assinatura. Sites que
-  exigem conta (alguns vídeos do Vimeo, posts privados do Instagram, conteúdo de membros)
-  continuam recusados com uma mensagem clara.
+- Só conteúdo que você já pode acessar: **não** há DRM nem burla de assinatura. Os cookies do
+  YouTube são opcionais, ficam no aparelho e permitem usar a sessão do usuário; use uma conta
+  secundária. Sites que exigem conta (alguns vídeos do Vimeo, posts privados do Instagram,
+  conteúdo de membros) continuam recusados com uma mensagem clara.
 - Transmissões ao vivo e estreias não são baixadas.
 - Links para o próprio PC ou para a rede (`localhost`, `10/8`, `172.16/12`, `192.168/16`,
   `100.64/10`, `.local`, nomes sem domínio, formas disfarçadas como `127.1` e nomes que apontam

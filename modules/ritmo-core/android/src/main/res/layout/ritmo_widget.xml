@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent"
+  android:background="@drawable/ritmo_widget_bg"
+  android:gravity="center_vertical"
+  android:orientation="horizontal"
+  android:padding="10dp">
+
+  <ImageView
+    android:id="@+id/widget_cover"
+    android:layout_width="56dp"
+    android:layout_height="56dp"
+    android:contentDescription="@string/ritmo_widget_cover"
+    android:scaleType="centerCrop"
+    android:src="@drawable/ritmo_widget_cover" />
+
+  <LinearLayout
+    android:id="@+id/widget_texts"
+    android:layout_width="0dp"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="12dp"
+    android:layout_weight="1"
+    android:orientation="vertical">
+
+    <TextView
+      android:id="@+id/widget_title"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:ellipsize="end"
+      android:maxLines="1"
+      android:textColor="#FFFFFF"
+      android:textSize="15sp"
+      android:textStyle="bold" />
+
+    <TextView
+      android:id="@+id/widget_artist"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:ellipsize="end"
+      android:maxLines="1"
+      android:textColor="#B3FFFFFF"
+      android:textSize="13sp" />
+  </LinearLayout>
+
+  <ImageButton
+    android:id="@+id/widget_prev"
+    android:layout_width="40dp"
+    android:layout_height="40dp"
+    android:background="@android:color/transparent"
+    android:contentDescription="@string/ritmo_widget_previous"
+    android:src="@drawable/ritmo_widget_prev" />
+
+  <ImageButton
+    android:id="@+id/widget_play"
+    android:layout_width="48dp"
+    android:layout_height="48dp"
+    android:background="@android:color/transparent"
+    android:contentDescription="@string/ritmo_widget_play"
+    android:src="@drawable/ritmo_widget_play" />
+
+  <ImageButton
+    android:id="@+id/widget_next"
+    android:layout_width="40dp"
+    android:layout_height="40dp"
+    android:background="@android:color/transparent"
+    android:contentDescription="@string/ritmo_widget_next"
+    android:src="@drawable/ritmo_widget_next" />
+</LinearLayout>

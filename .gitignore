@@ -41,3 +41,11 @@ example
 # generated native folders
 /ios
 /android
+
+# build do módulo nativo (Gradle) e pacotes gerados
+modules/*/android/build/
+modules/*/android/.gradle/
+modules/*/android/.cxx/
+*.apk
+*.aab
+*.ipa

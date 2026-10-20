@@ -1,0 +1,60 @@
+# IPA do iPhone SEM assinatura, para instalar de graça com o Sideloadly / AltStore (Apple ID comum).
+# Usado pelo perfil "ipa-gratis" do eas.json:  npx eas-cli@latest build -p ios --profile ipa-gratis
+# O Sideloadly assina o app no seu PC com o seu Apple ID (vale 7 dias; depois é só reinstalar).
+build:
+  name: IPA sem assinatura (Sideloadly)
+  steps:
+    - eas/checkout
+    - eas/install_node_modules
+    - eas/prebuild
+    - run:
+        name: Instalar pods
+        working_directory: ./ios
+        command: pod install
+    - run:
+        name: Compilar sem assinatura
+        working_directory: ./ios
+        command: |
+          # Sem "set -e" aqui: o código de saída do xcodebuild é tratado no fim, depois de mostrar os erros.
+          set +e
+          WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
+          SCHEME="${WORKSPACE%.xcworkspace}"
+          echo "Workspace: $WORKSPACE  Scheme: $SCHEME"
+          mkdir -p build
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/dd \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build > build/xcodebuild.log 2>&1
+          CODE=$?
+          # Mostra no log do EAS só o que importa (erros de compilação e o resultado).
+          grep -E "error:|BUILD (SUCCEEDED|FAILED)" build/xcodebuild.log | head -n 120 || true
+          if [ "$CODE" -ne 0 ]; then
+            echo "---- fim do log do xcodebuild ----"
+            tail -n 200 build/xcodebuild.log
+            exit "$CODE"
+          fi
+    - run:
+        name: Empacotar o IPA
+        working_directory: ./ios
+        command: |
+          set -eo pipefail
+          APP=$(ls -d build/dd/Build/Products/Release-iphoneos/*.app | head -n 1)
+          echo "App: $APP"
+          rm -rf build/Payload build/Ritmo.ipa
+          mkdir -p build/Payload
+          cp -R "$APP" build/Payload/
+          cd build
+          zip -qry Ritmo.ipa Payload
+          ls -lh Ritmo.ipa
+    - eas/upload_artifact:
+        name: Enviar o IPA
+        inputs:
+          type: application-archive
+          path: ios/build/Ritmo.ipa

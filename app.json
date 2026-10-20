@@ -1,26 +1,78 @@
 {
   "expo": {
-    "name": "ritmo",
+    "name": "Player Downloader",
     "slug": "ritmo",
-    "version": "1.0.0",
+    "version": "1.4.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "ritmo",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.ritmo.player",
+      "buildNumber": "4",
+      "supportsTablet": true,
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "audio"
+        ],
+        "UIFileSharingEnabled": true,
+        "LSSupportsOpeningDocumentsInPlace": true,
+        "NSAppleMusicUsageDescription": "O Ritmo toca as músicas que você sincronizou com o app Música.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleDevelopmentRegion": "pt-BR",
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Áudio",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.audio"
+            ]
+          },
+          {
+            "CFBundleTypeName": "Vídeo",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.movie"
+            ]
+          }
+        ]
+      }
     },
     "android": {
+      "package": "com.ritmo.player",
+      "versionCode": 6,
+      "allowBackup": false,
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#7C4DFF",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
+      "permissions": [
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.WAKE_LOCK",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.WRITE_SETTINGS"
+      ],
+      "blockedPermissions": [
+        "com.google.android.gms.permission.AD_ID",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA"
+      ],
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "output": "server",
+      "output": "single",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
@@ -28,15 +80,104 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#7C4DFF",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 96
+        }
+      ],
+      "expo-video",
+      "expo-sharing",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "O Ritmo usa as fotos que você escolher como capa de música ou fundo do tema.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ],
+      "./plugins/withShortCmakePaths",
+      "./plugins/withRitmoAndroid",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "O Ritmo usa o Face ID para abrir a pasta privada."
+        }
+      ],
+      [
+        "expo-screen-orientation",
+        {
+          "initialOrientation": "PORTRAIT_UP"
+        }
+      ],
+      [
+        "./plugins/withRitmoIos",
+        {
+          "carPlay": false
+        }
+      ],
+      [
+        "./plugins/withRitmoShareExtension",
+        {
+          "groupIdentifier": "group.com.ritmo.player"
+        }
+      ],
+      [
+        "expo-widgets",
+        {
+          "groupIdentifier": "group.com.ritmo.player",
+          "widgets": [
+            {
+              "name": "NowPlaying",
+              "displayName": "Player Downloader",
+              "description": "A música tocando agora, com tocar e pausar.",
+              "ios": {
+                "supportedFamilies": [
+                  "systemSmall",
+                  "systemMedium"
+                ]
+              },
+              "android": null
+            }
+          ]
         }
       ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "locales": {
+      "pt": "./locales/pt.json",
+      "en": "./locales/en.json",
+      "es": "./locales/es.json"
+    },
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "targetName": "ExpoWidgetsTarget",
+                  "bundleIdentifier": "com.ritmo.player.ExpoWidgetsTarget",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.com.ritmo.player"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "projectId": "43b8602f-fd47-4b15-95e1-59b780c80b39"
+      }
+    },
+    "owner": "aike171"
   }
 }

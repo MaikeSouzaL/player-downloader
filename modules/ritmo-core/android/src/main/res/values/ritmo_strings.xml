@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="ritmo_widget_description">Controle a música da tela inicial</string>
+  <string name="ritmo_widget_empty">Toque para escolher uma música</string>
+  <string name="ritmo_widget_cover">Capa do álbum</string>
+  <string name="ritmo_widget_previous">Anterior</string>
+  <string name="ritmo_widget_play">Tocar ou pausar</string>
+  <string name="ritmo_widget_next">Próxima</string>
+</resources>

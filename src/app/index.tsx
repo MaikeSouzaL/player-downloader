@@ -1,98 +1,137 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image } from 'expo-image';
+import { router } from 'expo-router';
+import { useState } from 'react';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { TabBar, TabView } from 'react-native-tab-view';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { AppBackground, useBackgroundUri } from '@/components/AppBackground';
+import { MiniPlayer } from '@/components/MiniPlayer';
+import { SortSheet, type SortTab } from '@/components/SortSheet';
+import { IconButton } from '@/components/ui/Button';
+import { Text } from '@/components/ui/Text';
+import { useT, type StringKey } from '@/i18n';
+import { AlbumsTab } from '@/screens/AlbumsTab';
+import { ArtistsTab } from '@/screens/ArtistsTab';
+import { FoldersTab } from '@/screens/FoldersTab';
+import { PlaylistsTab } from '@/screens/PlaylistsTab';
+import { SongsTab } from '@/screens/SongsTab';
+import { VideosTab } from '@/screens/VideosTab';
+import { useSettings } from '@/store/settings';
+import { useUi, type HomeTab } from '@/store/ui';
+import { space, useColors } from '@/theme';
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
+const ROUTES: { key: HomeTab; title: StringKey }[] = [
+  { key: 'songs', title: 'library.tab.songs' },
+  { key: 'playlists', title: 'library.tab.playlists' },
+  { key: 'folders', title: 'library.tab.folders' },
+  { key: 'albums', title: 'library.tab.albums' },
+  { key: 'artists', title: 'library.tab.artists' },
+  { key: 'videos', title: 'library.tab.videos' },
+];
+
+/** Aba → "Ordenar por" correspondente (Playlists não tem). */
+const SORT_TAB: Record<string, SortTab | undefined> = {
+  songs: 'songs',
+  folders: 'folders',
+  albums: 'albums',
+  artists: 'artists',
+  videos: 'videos',
+};
+
+/** Tela principal (fragment_main_motion do Lark): cabeçalho, abas no topo e mini player. */
+export default function MainScreen() {
+  const tr = useT();
+  const colors = useColors();
+  const insets = useSafeAreaInsets();
+  const layout = useWindowDimensions();
+  // A aba fica no store: quando um download termina, o app abre Músicas ou Vídeo sozinho.
+  const homeTab = useUi((s) => s.homeTab);
+  const index = Math.max(0, ROUTES.findIndex((r) => r.key === homeTab));
+  const setIndex = (next: number) => useUi.getState().setHomeTab(ROUTES[next]?.key ?? 'songs');
+  const [sortOpen, setSortOpen] = useState(false);
+  const photo = !!useBackgroundUri();
+  const bar = photo ? 'transparent' : colors.surface;
+  const albumView = useSettings((s) => s.albumView);
+  const videoView = useSettings((s) => s.videoView);
+  const routeKey = ROUTES[index].key;
+  const sortTab = SORT_TAB[routeKey];
+  const view = routeKey === 'albums' ? albumView : routeKey === 'videos' ? videoView : undefined;
+  const toggleView = () => {
+    const next = view === 'grid' ? 'list' : 'grid';
+    useSettings.getState().set(routeKey === 'albums' ? { albumView: next } : { videoView: next });
+  };
+
+  const routes = ROUTES.map((r) => ({ key: r.key, title: tr(r.title) }));
+
+  const renderScene = ({ route }: { route: { key: string } }) => {
+    switch (route.key) {
+      case 'songs':
+        return <SongsTab onSort={() => setSortOpen(true)} />;
+      case 'playlists':
+        return <PlaylistsTab />;
+      case 'folders':
+        return <FoldersTab />;
+      case 'albums':
+        return <AlbumsTab />;
+      case 'artists':
+        return <ArtistsTab />;
+      default:
+        return <VideosTab />;
+    }
+  };
+
   return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
-
-export default function HomeScreen() {
-  return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
-
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppBackground />
+      <View style={[styles.head, { paddingTop: insets.top + space.sm, backgroundColor: bar }]}>
+        <Image source={require('@/assets/images/icon.png')} style={styles.logo} accessibilityIgnoresInvertColors />
+        <Text variant="title" style={styles.brand} accessibilityRole="header" numberOfLines={1}>
+          Player Downloader
+        </Text>
+        <IconButton icon="settings" label={tr('common.settings')} onPress={() => router.push('/settings')} />
+        {view && (
+          <IconButton
+            icon={view === 'grid' ? 'view_list' : 'grid_view'}
+            label={view === 'grid' ? tr('library.viewList') : tr('library.viewGrid')}
+            onPress={toggleView}
           />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
+        )}
+        {sortTab && <IconButton icon="sort" label={tr('common.sort')} onPress={() => setSortOpen(true)} />}
+        <IconButton icon="download" label={tr('tools.dl.title')} onPress={() => router.push('/downloads')} />
+        <IconButton icon="search" label={tr('common.search')} onPress={() => router.push('/search')} />
+      </View>
+      <TabView
+        navigationState={{ index, routes }}
+        renderScene={renderScene}
+        onIndexChange={setIndex}
+        initialLayout={{ width: layout.width }}
+        lazy
+        renderTabBar={(props) => (
+          <TabBar
+            {...props}
+            scrollEnabled
+            activeColor={colors.text}
+            inactiveColor={colors.textMuted}
+            style={{ backgroundColor: bar, elevation: 0, shadowOpacity: 0 }}
+            tabStyle={{ width: 'auto', paddingHorizontal: space.md, minHeight: 44 }}
+            indicatorStyle={{ backgroundColor: colors.primary, height: 3, borderRadius: 2 }}
+            contentContainerStyle={{ paddingHorizontal: space.sm }}
+            options={Object.fromEntries(
+              ROUTES.map((r) => [r.key, { labelStyle: { fontSize: 15, fontWeight: '600', textTransform: 'none' } }])
+            )}
           />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+        )}
+        style={{ backgroundColor: photo ? 'transparent' : colors.background }}
+      />
+      <MiniPlayer />
+      {sortTab && <SortSheet tab={sortTab} visible={sortOpen} onClose={() => setSortOpen(false)} />}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
-  },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
-  },
+  head: { flexDirection: 'row', alignItems: 'center', paddingLeft: space.lg, paddingRight: space.xs, paddingBottom: space.xs },
+  logo: { width: 30, height: 30, borderRadius: 8 },
+  brand: { flex: 1, marginLeft: space.sm, letterSpacing: 0.2 },
 });

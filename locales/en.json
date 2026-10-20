@@ -1,0 +1,8 @@
+{
+  "ios": {
+    "CFBundleDisplayName": "Player Downloader",
+    "NSAppleMusicUsageDescription": "Player Downloader plays the songs you synced to the Music app.",
+    "NSPhotoLibraryUsageDescription": "Player Downloader uses the photos you pick as song covers or theme backgrounds.",
+    "NSFaceIDUsageDescription": "Player Downloader uses Face ID to unlock the private folder."
+  }
+}

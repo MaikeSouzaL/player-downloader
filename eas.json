@@ -1,0 +1,39 @@
+{
+  "cli": {
+    "appVersionSource": "local"
+  },
+  "build": {
+    "simulator": {
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "EXPO_NO_CAPABILITY_SYNC": "1"
+      }
+    },
+    "ipa-gratis": {
+      "ios": {
+        "withoutCredentials": true,
+        "image": "sdk-58",
+        "config": "ios-unsigned.yml"
+      },
+      "env": {
+        "EXPO_NO_CAPABILITY_SYNC": "1"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "ios": {
+        "resourceClass": "default"
+      }
+    },
+    "production": {
+      "ios": {
+        "resourceClass": "default"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

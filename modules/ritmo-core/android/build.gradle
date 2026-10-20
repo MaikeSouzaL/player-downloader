@@ -1,0 +1,33 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.ritmocore'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.ritmocore"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  // Mesma versão do expo-video, para as duas libs dividirem o mesmo media3.
+  def media3Version = "1.9.1"
+  implementation "androidx.media3:media3-exoplayer:${media3Version}"
+  implementation "androidx.media3:media3-session:${media3Version}"
+  implementation "androidx.media3:media3-common:${media3Version}"
+  implementation "androidx.media3:media3-datasource:${media3Version}"
+  // Converter vídeo em áudio (extrai/recodifica a faixa de áudio para AAC/M4A).
+  implementation "androidx.media3:media3-transformer:${media3Version}"
+
+  testImplementation 'junit:junit:4.13.2'
+  // org.json de verdade nos testes da JVM (o do android.jar é só "stub").
+  testImplementation 'org.json:json:20240303'
+}

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="ritmo_widget_description">Control your music from the home screen</string>
+  <string name="ritmo_widget_empty">Tap to pick a song</string>
+  <string name="ritmo_widget_cover">Album cover</string>
+  <string name="ritmo_widget_previous">Previous</string>
+  <string name="ritmo_widget_play">Play or pause</string>
+  <string name="ritmo_widget_next">Next</string>
+</resources>

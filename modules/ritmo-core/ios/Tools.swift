@@ -14,7 +14,7 @@ final class ToolError: Exception, @unchecked Sendable {
 // MARK: - Salvar na biblioteca
 
 /**
- * No iPhone a "biblioteca" é a pasta do app (Documents, visível em Arquivos › No meu iPhone › Ritmo):
+ * No iPhone a "biblioteca" é a pasta do app (Documents, visível em Arquivos › No meu iPhone › Player Downloader):
  * áudio vai para "Músicas" e vídeo para "Vídeos". Aceita arquivos abertos "no lugar" pelo app Arquivos
  * (URL com escopo de segurança) e move o que veio pela caixa de entrada (Documents/Inbox).
  */
@@ -42,7 +42,7 @@ enum MediaSaverIOS {
     return roots.contains { path.hasPrefix(canonical($0) + "/") }
   }
 
-  /// Caixa de entrada (Documents/Inbox), cache ou temporários: o arquivo já é uma cópia do Ritmo e pode ser movido.
+  /// Caixa de entrada (Documents/Inbox), cache ou temporários: o arquivo já é uma cópia do app e pode ser movido.
   static func isTemporary(_ url: URL) -> Bool {
     isInside(url, [LibraryStore.documents.appendingPathComponent("Inbox", isDirectory: true), LibraryStore.caches, FileManager.default.temporaryDirectory])
   }
@@ -66,7 +66,7 @@ enum MediaSaverIOS {
     return url
   }
 
-  /// Apaga um arquivo do Ritmo. Sem `library`, só temporários (cache e tmp); com ele, também a biblioteca
+  /// Apaga um arquivo do app. Sem `library`, só temporários (cache e tmp); com ele, também a biblioteca
   /// (Documents), para excluir músicas e vídeos. A pasta privada (Application Support) nunca.
   static func deleteLocal(_ uri: String, library: Bool = false) -> Bool {
     guard let url = URL(string: uri), url.isFileURL else { return false }
@@ -295,7 +295,7 @@ final class DownloadsIOS: NSObject, URLSessionDownloadDelegate {
       items = saved
     }
     let config = URLSessionConfiguration.background(withIdentifier: Self.sessionIdentifier)
-    // Sem acordar o app em segundo plano: o iOS baixa sozinho e entrega tudo quando o Ritmo abre de novo.
+    // Sem acordar o app em segundo plano: o iOS baixa sozinho e entrega tudo quando o app abre de novo.
     // (Acordar o app travaria no handler do expo-file-system, que segura o aviso de qualquer sessão.)
     config.sessionSendsLaunchEvents = false
     config.isDiscretionary = false
@@ -317,7 +317,7 @@ final class DownloadsIOS: NSObject, URLSessionDownloadDelegate {
       throw ToolError("Link inválido")
     }
     var request = URLRequest(url: remote)
-    request.setValue("Ritmo/1.4 (iOS)", forHTTPHeaderField: "User-Agent")
+    request.setValue("PlayerDownloader/1.5 (iOS)", forHTTPHeaderField: "User-Agent")
     let task = session.downloadTask(with: request)
     let id = UUID().uuidString
     task.taskDescription = id
@@ -491,7 +491,7 @@ enum VaultIOS {
     let ext = (name as NSString).pathExtension
     let file = ext.isEmpty ? id : "\(id).\(ext)"
     let target = dir.appendingPathComponent(file)
-    // O que veio pela caixa de entrada (ou do cache) é uma cópia do Ritmo: move, para não sobrar no app Arquivos.
+    // O que veio pela caixa de entrada (ou do cache) é uma cópia do app: move, para não sobrar no app Arquivos.
     let moved = MediaSaverIOS.isTemporary(source)
     if moved {
       try FileManager.default.moveItem(at: source, to: target)

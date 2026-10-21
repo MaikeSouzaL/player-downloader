@@ -6,6 +6,7 @@ import { Appearance, AppState, StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { AnimatedSplash } from '@/components/AnimatedSplash';
 import { PlaylistPicker } from '@/components/PlaylistPicker';
 import { Toast } from '@/components/Toast';
 import { TrackMenu } from '@/components/TrackMenu';
@@ -14,6 +15,10 @@ import { Icon } from '@/components/ui/Icon';
 import { Text } from '@/components/ui/Text';
 import { refreshDeviceLang, useT } from '@/i18n';
 import { installGlobalErrorLogging, logError } from '@/lib/errorlog';
+import RitmoCore from '@/modules/ritmo-core';
+import { applyOrientation } from '@/lib/orientation';
+import { watchPlaybackTuning } from '@/lib/playback-tuning';
+import { watchPodcastDownloads } from '@/lib/podcasts';
 import { IS_IOS } from '@/lib/platform';
 import { useCollections } from '@/store/collections';
 import { useEdits } from '@/store/edits';
@@ -22,20 +27,23 @@ import { setCurrentRoute } from '@/lib/current-route';
 import { recoverInterrupted, watchDownloads } from '@/lib/downloads';
 import { startErrorReporting } from '@/lib/error-report';
 import { watchGrabQueue } from '@/lib/grab-queue';
+import { startGrabUpdateWatcher } from '@/lib/grab-updater';
 import { syncBrowseData } from '@/store/browse';
 import { useDownloads } from '@/store/downloads';
-import { useErrorReports } from '@/store/errorReports';
 import { useGrabQueue } from '@/store/grabQueue';
 import { startShareListener } from '@/store/share';
 import { useVault } from '@/store/vault';
 import { startWidgetSync } from '@/widget';
 import { attachPlayerEvents, restorePlayback } from '@/store/player';
+import { useAudiobook } from '@/store/audiobook';
 import { useSettings } from '@/store/settings';
 import { hydrated } from '@/store/storage';
 import { useVideoProgress } from '@/store/video-progress';
 import { space, useColors, useIsDark } from '@/theme';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
+// A tela do sistema sai de uma vez: o fade padrão (0,4 s) cobriria o começo do vídeo de abertura.
+SplashScreen.setOptions({ duration: 0, fade: false });
 installGlobalErrorLogging();
 
 /** Tela de erro no lugar de uma tela branca; o erro vai para o Registro de erros. */
@@ -68,6 +76,9 @@ function useBootstrap() {
     let stopWidgetSync: (() => void) | undefined;
     let stopShare: (() => void) | undefined;
     let stopReports: (() => void) | undefined;
+    let stopTuning: (() => void) | undefined;
+    let stopPodcasts: (() => void) | undefined;
+    let stopGrabUpdates: (() => void) | undefined;
     (async () => {
       let granted = false;
       try {
@@ -78,10 +89,10 @@ function useBootstrap() {
           hydrated(useVideoProgress),
           hydrated(useDownloads),
           hydrated(useVault),
+          hydrated(useAudiobook),
           hydrated(useGrabQueue),
-          hydrated(useErrorReports),
         ]);
-        // Daqui em diante todo erro também vai para o servidor (relatório para corrigir bugs).
+        // Crash nativo da última abertura entra no registro local de erros.
         if (alive) stopReports = startErrorReporting();
         // Algo chegou pelo "Compartilhar" / "Abrir com"? Abre já, sem esperar a varredura da biblioteca.
         if (alive) stopShare = startShareListener();
@@ -89,7 +100,7 @@ function useBootstrap() {
         granted = await library.checkPermission();
         if (granted) await library.scan();
       } finally {
-        // Aconteça o que acontecer, a tela de abertura sai.
+        // Aconteça o que acontecer, a tela do sistema sai (normalmente a abertura animada já tirou).
         await SplashScreen.hideAsync().catch(() => {});
       }
       // Primeira abertura: explica as permissões antes de pedir.
@@ -100,9 +111,14 @@ function useBootstrap() {
         // Downloads que ficaram em andamento.
         recoverInterrupted();
         watchDownloads();
-        // E o que o servidor ainda estava preparando.
+        // E o que o motor local ainda estava preparando.
         watchGrabQueue();
+        // iOS: procura wheels novas do yt-dlp no PyPI sem atrapalhar a abertura.
+        stopGrabUpdates = startGrabUpdateWatcher();
       }
+      // Transição, pular silêncio e ReplayGain vão para o player nativo (e de novo quando mudarem).
+      if (alive) stopTuning = watchPlaybackTuning();
+      if (alive) stopPodcasts = watchPodcastDownloads();
       if (alive) await restorePlayback();
     })().catch((e) => logError('Abertura do app', e));
 
@@ -122,6 +138,9 @@ function useBootstrap() {
       stopWidgetSync?.();
       stopShare?.();
       stopReports?.();
+      stopTuning?.();
+      stopPodcasts?.();
+      stopGrabUpdates?.();
       unwatch();
       sub.remove();
     };
@@ -143,6 +162,19 @@ export default function RootLayout() {
   useEffect(() => {
     Appearance.setColorScheme(theme === 'system' ? 'unspecified' : theme);
   }, [theme]);
+  const rotation = useSettings((s) => s.rotation);
+  useEffect(() => {
+    applyOrientation(rotation);
+  }, [rotation]);
+  // Balão flutuante (Android): o nativo guarda o ajuste e decide quando aparecer.
+  const bubble = useSettings((s) => s.bubble);
+  useEffect(() => {
+    try {
+      RitmoCore.setFloatingBubble?.(bubble);
+    } catch (e) {
+      logError('Balão flutuante', e);
+    }
+  }, [bubble]);
   useBootstrap();
 
   const isDark = useIsDark();
@@ -192,11 +224,15 @@ export default function RootLayout() {
               <Stack.Screen name="settings/errors" options={{ title: tr('settings.errors') }} />
               <Stack.Screen name="settings/trash" options={{ title: tr('settings.trash') }} />
               <Stack.Screen name="settings/backup" options={{ title: tr('settings.backup') }} />
+              <Stack.Screen name="settings/grab" options={{ title: tr('settings.grabEngine') }} />
               <Stack.Screen name="share" options={{ title: tr('tools.share.title'), presentation: 'modal' }} />
               <Stack.Screen name="downloads" options={{ title: tr('tools.dl.title') }} />
+              <Stack.Screen name="recap" options={{ title: tr('extras.stats.title') }} />
+              <Stack.Screen name="podcasts/index" options={{ title: tr('extras.podcast.title') }} />
+              <Stack.Screen name="podcasts/[id]" options={{ title: '' }} />
               <Stack.Screen name="grab" options={{ title: tr('tools.grab.title') }} />
               <Stack.Screen name="browser" options={{ headerShown: false }} />
-              <Stack.Screen name="settings/grab" options={{ title: tr('tools.grab.server') }} />
+
               <Stack.Screen name="vault" options={{ title: tr('tools.vault.title') }} />
               <Stack.Screen name="edit/[id]" options={{ title: tr('settings.screen.editInfo') }} />
               <Stack.Screen name="playlist/arrange" options={{ title: tr('settings.screen.arrange') }} />
@@ -206,6 +242,7 @@ export default function RootLayout() {
             <TrackMenu />
             <PlaylistPicker />
             <Toast />
+            <AnimatedSplash />
           </View>
         </ThemeProvider>
       </SafeAreaProvider>

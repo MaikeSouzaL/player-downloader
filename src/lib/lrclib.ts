@@ -5,7 +5,7 @@ import { normalize } from './format.ts';
  * Só é chamado quando a pessoa toca em "Buscar letra"; nada é enviado sozinho.
  */
 const API = 'https://lrclib.net/api';
-const USER_AGENT = 'Ritmo (player de música sem anúncios)';
+const USER_AGENT = 'Player Downloader (player de música sem anúncios)';
 const MAX_DURATION_DIFF_S = 4;
 
 /** Registro como vem da API. */

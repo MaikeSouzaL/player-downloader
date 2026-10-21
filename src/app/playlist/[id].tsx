@@ -18,8 +18,8 @@ import { radius, space, useColors } from '@/theme';
 
 const SMART: Record<string, { title: StringKey; icon: IconName; tint: string; empty: StringKey }> = {
   liked: { title: 'library.smart.liked', icon: 'favorite', tint: '#F44F5E', empty: 'library.smart.likedEmpty' },
-  recent: { title: 'library.smart.recent', icon: 'history', tint: '#2596FF', empty: 'library.smart.playedEmpty' },
-  top: { title: 'library.smart.top', icon: 'trending_up', tint: '#FB7746', empty: 'library.smart.playedEmpty' },
+  recent: { title: 'library.smart.recent', icon: 'history', tint: '#FD7846', empty: 'library.smart.playedEmpty' },
+  top: { title: 'library.smart.top', icon: 'trending_up', tint: '#D84B22', empty: 'library.smart.playedEmpty' },
 };
 
 export default function PlaylistScreen() {

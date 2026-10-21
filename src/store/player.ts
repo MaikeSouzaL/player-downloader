@@ -2,11 +2,15 @@ import { useMemo } from 'react';
 import { create } from 'zustand';
 
 import { t } from '@/i18n';
+import { isLong, resumePosition } from '@/lib/audiobook';
 import { errorMessage } from '@/lib/errors';
+import { formatDuration } from '@/lib/format';
 import RitmoCore, { type PlayerSnapshot, type QueueItem, type RepeatMode, type SleepTimerState } from '@/modules/ritmo-core';
 import { logError } from '@/lib/errorlog';
+import { haptic } from '@/lib/haptics';
 import type { Track } from '@/lib/library';
 import { neighborIndices } from '@/lib/queue';
+import { useAudiobook } from '@/store/audiobook';
 import { useCollections } from '@/store/collections';
 import { useExternalTracks } from '@/store/external-tracks';
 import { useLibrary } from '@/store/library';
@@ -42,6 +46,8 @@ type PlayerState = {
   clearQueue: () => Promise<void>;
   setSleepTimer: (minutes: number, endOfTrack?: boolean) => Promise<void>;
   syncQueue: () => Promise<void>;
+  /** Recarrega a fila no mesmo ponto (o arquivo da música atual mudou por baixo, ex.: tags gravadas). */
+  reloadQueue: (play: boolean) => Promise<void>;
 };
 
 /**
@@ -87,6 +93,9 @@ export const usePlayer = create<PlayerState>()((set, get) => {
       if (tracks.length === 0) return;
       const start = options.shuffle ? Math.floor(Math.random() * tracks.length) : Math.min(Math.max(0, startIndex), tracks.length - 1);
       set({ queue: tracks.map((t) => t.id), error: null });
+      // Tocar de novo o mesmo audiolivro: guarda onde ele estava e confere a retomada (o ID não muda).
+      if (lastSpot) saveSpot(lastSpot.id, lastSpot.position, lastSpot.duration);
+      resumeCheck = tracks[start].id;
       await run('tocar', async () => {
         await RitmoCore.setShuffle(!!options.shuffle);
         await RitmoCore.setQueue(tracks.map(toQueueItem), start, 0, true);
@@ -94,9 +103,18 @@ export const usePlayer = create<PlayerState>()((set, get) => {
       await get().syncQueue();
     },
 
-    toggle: () => run('play/pause', () => (get().snapshot?.isPlaying ? RitmoCore.pause() : RitmoCore.play())),
-    next: () => run('próxima', () => RitmoCore.next()),
-    previous: () => run('anterior', () => RitmoCore.previous()),
+    toggle: () => {
+      haptic('tap');
+      return run('play/pause', () => (get().snapshot?.isPlaying ? RitmoCore.pause() : RitmoCore.play()));
+    },
+    next: () => {
+      haptic('tap');
+      return run('próxima', () => RitmoCore.next());
+    },
+    previous: () => {
+      haptic('tap');
+      return run('anterior', () => RitmoCore.previous());
+    },
     seek: async (ms) => {
       set({ position: ms });
       await run('buscar posição', () => RitmoCore.seekTo(ms));
@@ -113,7 +131,10 @@ export const usePlayer = create<PlayerState>()((set, get) => {
     setRepeat: (mode) => run('repetir', () => RitmoCore.setRepeat(mode)),
     cycleRepeat: () => run('repetir', () => RitmoCore.setRepeat(REPEAT_CYCLE[get().snapshot?.repeat ?? 'off'])),
     setSpeed: async (speed) => {
-      useSettings.getState().set({ speed });
+      // Arquivo longo (audiolivro, podcast) guarda a velocidade só para ele; o resto muda a geral.
+      const { snapshot, duration } = get();
+      if (useSettings.getState().resumeLong && snapshot?.mediaId && isLong(duration)) useAudiobook.getState().setSpeed(snapshot.mediaId, speed);
+      else useSettings.getState().set({ speed });
       await run('velocidade', () => RitmoCore.setSpeed(speed));
     },
     playNext: async (tracks) => {
@@ -153,6 +174,15 @@ export const usePlayer = create<PlayerState>()((set, get) => {
         logError('Player: timer', e);
       }
     },
+    reloadQueue: async (play) => {
+      const { snapshot, queue } = get();
+      if (!snapshot || snapshot.index < 0 || queue.length === 0) return;
+      const byId = useLibrary.getState().index.byId;
+      const tracks = queue.map((id) => byId.get(id) ?? useExternalTracks.getState().tracks[id]);
+      if (tracks.some((t) => !t)) return;
+      await run('recarregar a fila', () => RitmoCore.setQueue((tracks as Track[]).map(toQueueItem), snapshot.index, snapshot.position, play));
+      await get().syncQueue();
+    },
     syncQueue: async () => {
       try {
         const native = await RitmoCore.getQueue();
@@ -167,6 +197,36 @@ export const usePlayer = create<PlayerState>()((set, get) => {
 let lastTickAt = 0;
 let pendingPlayMs = 0;
 let recordedId: string | null = null;
+
+// "Lembrar onde parou": a última posição conhecida e a faixa que ainda falta conferir ao ficar pronta.
+let lastSpot: { id: string; position: number; duration: number } | null = null;
+let lastSpotSaveAt = 0;
+let resumeCheck: string | null = null;
+
+/** Guarda onde parou, se a faixa for longa e o ajuste estiver ligado. */
+function saveSpot(id: string | null | undefined, position: number, duration: number) {
+  if (!id || !useSettings.getState().resumeLong || !isLong(duration)) return;
+  useAudiobook.getState().saveSpot(id, position, duration);
+}
+
+/**
+ * Faixa nova pronta: arquivo longo volta com a velocidade dele e continua de onde parou; ao sair dele,
+ * a velocidade geral volta. Fila restaurada já no meio (reabrir o app) não é mexida.
+ */
+function applyLongTrack(snapshot: PlayerSnapshot) {
+  const id = snapshot.mediaId;
+  if (!id) return;
+  const { resumeLong, speed: globalSpeed } = useSettings.getState();
+  const long = resumeLong && isLong(snapshot.duration);
+  const target = (long ? useAudiobook.getState().speeds[id]?.speed : undefined) ?? globalSpeed;
+  if (Math.abs(snapshot.speed - target) > 0.001) RitmoCore.setSpeed(target).catch((e) => logError('Player: velocidade do arquivo', e));
+  if (!long || snapshot.position > 5_000) return;
+  const from = resumePosition(useAudiobook.getState().spots[id], snapshot.duration);
+  if (from === null) return;
+  usePlayer.setState({ position: from });
+  RitmoCore.seekTo(from).catch((e) => logError('Player: continuar de onde parou', e));
+  useUi.getState().showToast(t('extras.play.resumed', { time: formatDuration(from) }));
+}
 
 /** Soma o tempo ouvido em memória e grava de vez em quando (cada gravação reescreve o AsyncStorage). */
 function flushPlayTime() {
@@ -195,7 +255,19 @@ export function attachPlayerEvents(): () => void {
         recordedId = snapshot.mediaId;
         useCollections.getState().recordPlay(snapshot.mediaId);
       }
-      if (prev?.isPlaying && !snapshot.isPlaying) flushPlayTime();
+      if (prev?.isPlaying && !snapshot.isPlaying) {
+        flushPlayTime();
+        saveSpot(snapshot.mediaId, snapshot.position, snapshot.duration);
+      }
+      if (snapshot.mediaId !== (prev?.mediaId ?? null)) {
+        // Saiu de uma faixa longa no meio: guarda onde estava.
+        if (lastSpot && lastSpot.id !== snapshot.mediaId) saveSpot(lastSpot.id, lastSpot.position, lastSpot.duration);
+        resumeCheck = snapshot.mediaId;
+      }
+      if (resumeCheck && snapshot.mediaId === resumeCheck && snapshot.state === 'ready' && snapshot.duration > 0) {
+        resumeCheck = null;
+        applyLongTrack(snapshot);
+      }
     }),
     RitmoCore.addListener('onProgress', (p) => {
       usePlayer.setState({ position: p.position, duration: p.duration || usePlayer.getState().duration });
@@ -204,6 +276,13 @@ export function attachPlayerEvents(): () => void {
       if (usePlayer.getState().snapshot?.isPlaying && now - lastTickAt < 15_000) pendingPlayMs += now - lastTickAt;
       lastTickAt = now;
       if (pendingPlayMs > 30_000) flushPlayTime();
+      if (p.mediaId) {
+        lastSpot = { id: p.mediaId, position: p.position, duration: p.duration };
+        if (now - lastSpotSaveAt > 10_000) {
+          lastSpotSaveAt = now;
+          saveSpot(p.mediaId, p.position, p.duration);
+        }
+      }
     }),
     RitmoCore.addListener('onSleepTimer', (sleep) => {
       usePlayer.setState({ sleep });

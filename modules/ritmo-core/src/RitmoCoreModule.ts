@@ -26,6 +26,8 @@ declare class RitmoCoreModule extends NativeModule<RitmoCoreEvents> {
   getArtwork(albumId: string, trackUri: string | null, size: number): Promise<string | null>;
   getVideoThumbnail(videoId: string, size: number): Promise<string | null>;
   clearArtworkCache(): Promise<void>;
+  /** Cor predominante da capa (hex): a mais viva e presente, e a média. Null se não der para ler a imagem. */
+  artworkColor(uri: string): Promise<{ dominant: string; average: string } | null>;
   readLyrics(path: string | null, uri: string): Promise<LyricsResult>;
 
   queryTrashed(): Promise<NativeTrack[]>;
@@ -35,6 +37,11 @@ declare class RitmoCoreModule extends NativeModule<RitmoCoreEvents> {
   deleteTracks(ids: string[]): Promise<boolean>;
   /** Apaga pela URI (vídeos e músicas). Android pede confirmação; resolve false se o usuário recusar. */
   deleteUris(uris: string[]): Promise<boolean>;
+  /**
+   * Grava título, artista, álbum e capa (URI da imagem) no próprio arquivo: MP3 e FLAC, só no Android.
+   * null = deixa como está. O Android pede autorização antes; recusar dá 'denied'.
+   */
+  writeTags(uri: string, title: string | null, artist: string | null, album: string | null, cover: string | null): Promise<'written' | 'denied' | 'unsupported'>;
   /** Das URIs passadas, as que ainda existem (para desfazer só o que não foi apagado). */
   existingUris(uris: string[]): Promise<string[]>;
 
@@ -69,6 +76,11 @@ declare class RitmoCoreModule extends NativeModule<RitmoCoreEvents> {
 
   setSleepTimer(minutes: number, endOfTrack: boolean): Promise<SleepTimerState>;
   getSleepTimer(): Promise<SleepTimerState>;
+  /**
+   * Transição suave (ms, 0 = desligada), álbuns contínuos sem fade, pular silêncio (só Android) e
+   * volume igualado (ReplayGain: 'off' | 'track' | 'album', com ajuste fino em dB). Fica salvo no nativo.
+   */
+  setPlaybackTuning(crossfadeMs: number, gaplessAlbums: boolean, skipSilence: boolean, replayGain: string, preampDb: number): Promise<void>;
 
   /** Recarrega a última fila salva pelo serviço, se o player estiver vazio. */
   restoreSavedQueue(play: boolean): Promise<boolean>;
@@ -78,9 +90,24 @@ declare class RitmoCoreModule extends NativeModule<RitmoCoreEvents> {
 
   // Compartilhar, salvar, converter, baixar e pasta privada (Android e iOS).
   getPendingShare(): SharePayload | null;
+
+  // Download no próprio aparelho (Android: yt-dlp/FFmpeg; iOS: yt-dlp + URLSession/AVFoundation).
+  grabAvailable(): boolean;
+  grabResolve(url: string, playlist: boolean): Promise<Record<string, unknown>>;
+  grabSearch(query: string, limit: number): Promise<Record<string, unknown>>;
+  grabStart(url: string, formatId: string, options: string): Promise<Record<string, unknown>>;
+  grabJobs(ids: string[]): Promise<Record<string, unknown>>;
+  grabCancel(id: string): void;
+  /** Atualizador do motor iOS via PyPI. Só existe no iOS. */
+  grabUpdateStatus?(): Promise<Record<string, unknown>>;
+  grabUpdateCheck?(force: boolean): Promise<Record<string, unknown>>;
+  grabUpdateInstall?(): Promise<Record<string, unknown>>;
+  grabUpdateRollback?(): Promise<Record<string, unknown>>;
+  /** Diagnóstico do motor iOS (build-only): versões e resolve opcional. Só existe no iOS. */
+  grabSelfTest?(options: { resolve?: boolean; url?: string | null }): Promise<Record<string, unknown>>;
   /** Crash nativo (Kotlin/Swift) da última vez que o app abriu, para o relatório de erros. Lê uma vez só. */
   takeLastCrash(): string | null;
-  /** Copia para a biblioteca (Android: Music/Ritmo ou Movies/Ritmo; iPhone: pasta do app). Devolve a URI salva. */
+  /** Copia para a biblioteca (Android: Music/Player Downloader ou Movies/Player Downloader; iPhone: pasta do app). Devolve a URI salva. */
   saveToLibrary(uri: string, name: string, mime: string | null, kind: MediaKind): Promise<string>;
   /** Vídeo/áudio → AAC/M4A. bitrateKbps 0 = original. Progresso no evento onConvertProgress. */
   convertToAudio(jobId: string, uri: string, name: string, bitrateKbps: number): Promise<string>;
@@ -95,6 +122,12 @@ declare class RitmoCoreModule extends NativeModule<RitmoCoreEvents> {
   vaultDelete(id: string): Promise<void>;
   /** Apaga a pasta privada inteira ("Esqueci o PIN"), mesmo com o índice estragado. */
   vaultWipe(): Promise<void>;
+
+  // Só no Android: balão flutuante por cima dos outros apps.
+  setFloatingBubble?(enabled: boolean): void;
+  canDrawOverlays?(): boolean;
+  /** Abre a tela do Android para liberar "Sobrepor a outros apps". */
+  openOverlayPermission?(): void;
 
   // Só no iOS: acesso ao app Música e a pasta das músicas importadas.
   mediaLibraryStatus?(): 'granted' | 'denied' | 'restricted' | 'undetermined';

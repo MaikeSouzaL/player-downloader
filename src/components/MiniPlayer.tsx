@@ -1,13 +1,15 @@
 import { router } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import { Animated, PanResponder, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
 
 import { Artwork } from '@/components/Artwork';
+import { LabelPlayIcon } from '@/components/LabelPlayIcon';
 import { IconButton } from '@/components/ui/Button';
-import { Icon } from '@/components/ui/Icon';
 import { Text } from '@/components/ui/Text';
 import { useT } from '@/i18n';
+import { haptic } from '@/lib/haptics';
 import { useCollections } from '@/store/collections';
 import { useCurrentTrack, usePlayer } from '@/store/player';
 import { space, useColors } from '@/theme';
@@ -15,7 +17,7 @@ import { space, useColors } from '@/theme';
 const RING = 40;
 const STROKE = 2.5;
 
-/** Botão play/pause com o anel de progresso em volta (CircleRingProgress do Lark). */
+/** Botão play/pause (rótulo do logo Vinil) com o anel de progresso em volta (CircleRingProgress do Lark). */
 function PlayRing() {
   const colors = useColors();
   const tr = useT();
@@ -42,7 +44,7 @@ function PlayRing() {
           origin={`${RING / 2}, ${RING / 2}`}
         />
       </Svg>
-      <Icon name={isPlaying ? 'pause' : 'play_arrow'} size={22} color={colors.text} />
+      <LabelPlayIcon playing={isPlaying} size={30} />
     </Pressable>
   );
 }
@@ -57,32 +59,62 @@ export function MiniPlayer({ bottomInset = true }: { bottomInset?: boolean }) {
   const toggleLike = useCollections((s) => s.toggleLike);
   const { previous, next } = usePlayer.getState();
 
+  // Arrastar para os lados troca de música sem abrir o player (para a esquerda: próxima).
+  const [dragX] = useState(() => new Animated.Value(0));
+  const swipe = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 14 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+        onPanResponderMove: (_, g) => dragX.setValue(g.dx),
+        onPanResponderRelease: (_, g) => {
+          const go = g.dx < -70 || g.vx < -0.8 ? 'next' : g.dx > 70 || g.vx > 0.8 ? 'previous' : null;
+          if (!go) {
+            Animated.spring(dragX, { toValue: 0, useNativeDriver: true, bounciness: 6 }).start();
+            return;
+          }
+          haptic('step');
+          Animated.timing(dragX, { toValue: go === 'next' ? -120 : 120, duration: 120, useNativeDriver: true }).start(() => {
+            void (go === 'next' ? usePlayer.getState().next() : usePlayer.getState().previous());
+            dragX.setValue(0);
+          });
+        },
+        onPanResponderTerminate: () => Animated.spring(dragX, { toValue: 0, useNativeDriver: true }).start(),
+      }),
+    [dragX]
+  );
+  const fade = dragX.interpolate({ inputRange: [-120, 0, 120], outputRange: [0.4, 1, 0.4], extrapolate: 'clamp' });
+
   if (!track) return null;
 
   return (
-    <View style={[styles.wrap, { backgroundColor: colors.surface, borderTopColor: colors.border, paddingBottom: bottomInset ? insets.bottom : 0 }]}>
+    <View {...swipe.panHandlers} style={[styles.wrap, { backgroundColor: colors.surface, borderTopColor: colors.border, paddingBottom: bottomInset ? insets.bottom : 0 }]}>
       <Pressable
         onPress={() => router.push('/player')}
         android_ripple={{ color: colors.ripple }}
         accessibilityRole="button"
         accessibilityLabel={tr('player.mini.open', { title: track.title })}
         style={styles.row}>
-        <Artwork track={track} size={44} radius={6} />
-        <View style={styles.texts}>
-          <Text variant="label" numberOfLines={1}>
-            {track.title}
-          </Text>
-          <Text variant="caption" muted numberOfLines={1}>
-            {track.artist ?? tr('common.unknownArtist')}
-          </Text>
-        </View>
+        <Animated.View style={[styles.swipe, { opacity: fade, transform: [{ translateX: dragX }] }]}>
+          <Artwork track={track} size={44} radius={6} />
+          <View style={styles.texts}>
+            <Text variant="label" numberOfLines={1}>
+              {track.title}
+            </Text>
+            <Text variant="caption" muted numberOfLines={1}>
+              {track.artist ?? tr('common.unknownArtist')}
+            </Text>
+          </View>
+        </Animated.View>
         <IconButton
           icon="favorite"
           label={liked ? tr('player.unlike') : tr('player.like')}
           color={liked ? colors.danger : colors.textMuted}
           size={22}
           box={38}
-          onPress={() => toggleLike(track.id)}
+          onPress={() => {
+            haptic('toggle');
+            toggleLike(track.id);
+          }}
         />
         <IconButton icon="skip_previous" label={tr('player.previous')} size={26} box={38} onPress={previous} />
         <PlayRing />
@@ -95,6 +127,7 @@ export function MiniPlayer({ bottomInset = true }: { bottomInset?: boolean }) {
 const styles = StyleSheet.create({
   wrap: { borderTopWidth: StyleSheet.hairlineWidth },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.xs, paddingLeft: space.md, paddingRight: space.sm, height: 64 },
+  swipe: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.xs },
   texts: { flex: 1, gap: 1, marginLeft: space.xs },
   ring: { width: RING, height: RING, alignItems: 'center', justifyContent: 'center', marginHorizontal: 2 },
 });

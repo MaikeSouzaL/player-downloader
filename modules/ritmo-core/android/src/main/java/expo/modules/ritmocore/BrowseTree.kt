@@ -388,7 +388,7 @@ object BrowseTree {
     return if (list.isEmpty()) null else list.map(::playable) to 0
   }
 
-  /** "Ok Google, tocar X no Ritmo": toca o resultado da busca (ou tudo no aleatório se vier vazio). */
+  /** "Ok Google, tocar X no Player Downloader": toca o resultado da busca (ou tudo no aleatório se vier vazio). */
   fun playFromSearch(context: Context, query: String): Pair<List<MediaItem>, Int>? {
     val results = search(context, query)
     return if (results.isEmpty()) null else results.map(::playable) to 0

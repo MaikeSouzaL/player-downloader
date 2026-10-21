@@ -11,11 +11,14 @@ import java.io.File
 import java.io.IOException
 
 /**
- * Salva um arquivo (recebido, baixado ou convertido) na biblioteca do aparelho: Music/Ritmo para áudio e
- * Movies/Ritmo para vídeo. No Android 10+ vai pelo MediaStore (sem permissão de escrita); antes disso fica
+ * Salva um arquivo (recebido, baixado ou convertido) na biblioteca do aparelho: Music/Player Downloader para áudio e
+ * Movies/Player Downloader para vídeo. No Android 10+ vai pelo MediaStore (sem permissão de escrita); antes disso fica
  * na pasta do app e é indexado pelo MediaScanner. Em todos os casos aparece em qualquer player.
  */
 object MediaSaver {
+  /** Pasta dos arquivos novos (até a 1.4 era "Ritmo"; o que já estava lá continua no lugar). */
+  private const val FOLDER = "Player Downloader"
+
   fun save(context: Context, source: Uri, name: String, mime: String?, kind: String): Uri {
     val isVideo = kind == "video"
     val safeName = sanitize(name)
@@ -31,7 +34,7 @@ object MediaSaver {
       val values = ContentValues().apply {
         put(MediaStore.MediaColumns.DISPLAY_NAME, safeName)
         put(MediaStore.MediaColumns.MIME_TYPE, type)
-        put(MediaStore.MediaColumns.RELATIVE_PATH, (if (isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_MUSIC) + "/Ritmo")
+        put(MediaStore.MediaColumns.RELATIVE_PATH, (if (isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_MUSIC) + "/" + FOLDER)
         put(MediaStore.MediaColumns.IS_PENDING, 1)
       }
       val target = resolver.insert(collection, values) ?: throw IOException("Não foi possível criar o arquivo na biblioteca")
@@ -49,7 +52,7 @@ object MediaSaver {
 
     val base = context.getExternalFilesDir(if (isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_MUSIC)
       ?: throw IOException("Armazenamento indisponível")
-    val dir = File(base, "Ritmo").apply { mkdirs() }
+    val dir = File(base, FOLDER).apply { mkdirs() }
     val file = unique(dir, safeName)
     try {
       (resolver.openInputStream(source) ?: throw IOException("Não foi possível ler o arquivo")).use { input ->
@@ -85,10 +88,7 @@ object MediaSaver {
     }
   }
 
-  fun sanitize(name: String): String {
-    val clean = name.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]+"), "_").trim().trim('.')
-    return clean.take(120).ifEmpty { "arquivo" }
-  }
+  fun sanitize(name: String): String = FileNames.sanitize(name)
 
   private fun unique(dir: File, name: String): File {
     var file = File(dir, name)

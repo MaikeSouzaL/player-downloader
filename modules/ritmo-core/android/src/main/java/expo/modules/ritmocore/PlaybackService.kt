@@ -14,6 +14,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
 import androidx.media3.exoplayer.ExoPlayer
@@ -78,6 +79,8 @@ class PlaybackService : MediaLibraryService() {
     AudioEffects.attach(this, audioSessionId)
 
     player.addListener(listener)
+    // Transição, pular silêncio e ReplayGain valem mesmo com o serviço subindo sem o app (fone, carro).
+    PlaybackTuning.load(this)
     PlaybackRuntime.attach(player)
 
     val builder = MediaLibrarySession.Builder(this, player, LibraryCallback())
@@ -124,11 +127,18 @@ class PlaybackService : MediaLibraryService() {
   private val listener = object : Player.Listener {
     override fun onTimelineChanged(timeline: Timeline, reason: Int) {
       if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) saveItems()
+      // Fila limpa ou nova com o app fora da tela: o balão some ou aparece.
+      FloatingBubble.refresh(this@PlaybackService)
     }
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+      PlaybackRuntime.onTransition(reason)
       saveState()
       refreshWidget()
+    }
+
+    override fun onTracksChanged(tracks: Tracks) {
+      PlaybackRuntime.onGainTags(PlaybackTuning.gainTags(tracks))
     }
 
     override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
@@ -136,6 +146,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
+      PlaybackRuntime.onPlayingChanged()
       handler.removeCallbacks(periodicSave)
       if (isPlaying) handler.postDelayed(periodicSave, SAVE_INTERVAL_MS) else saveState()
       refreshWidget()

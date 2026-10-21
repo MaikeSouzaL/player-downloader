@@ -6,4 +6,8 @@
   <string name="ritmo_widget_previous">Anterior</string>
   <string name="ritmo_widget_play">Tocar ou pausar</string>
   <string name="ritmo_widget_next">Próxima</string>
+  <string name="ritmo_bubble_open_controls">Balão do Player Downloader: toque para os controles</string>
+  <string name="ritmo_bubble_open_app">Abrir o Player Downloader</string>
+  <string name="ritmo_bubble_close">Fechar o balão</string>
+  <string name="ritmo_bubble_app" translatable="false">Player Downloader</string>
 </resources>

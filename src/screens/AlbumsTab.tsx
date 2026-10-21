@@ -7,12 +7,12 @@ import { Icon } from '@/components/ui/Icon';
 import { EmptyState } from '@/components/ui/misc';
 import { Text } from '@/components/ui/Text';
 import { artistName, useT } from '@/i18n';
+import { gridColumns } from '@/lib/layout';
 import { sortAlbums, UNKNOWN_ALBUM, type Album } from '@/lib/library';
 import { useLibrary } from '@/store/library';
 import { useSettings } from '@/store/settings';
 import { radius, space, useColors } from '@/theme';
 
-const COLUMNS = 2;
 const openAlbum = (album: Album) => router.push({ pathname: '/album/[id]', params: { id: album.id } });
 
 export function AlbumsTab() {
@@ -23,7 +23,9 @@ export function AlbumsTab() {
   const view = useSettings((s) => s.albumView);
   const albums = useMemo(() => sortAlbums(all, sort), [all, sort]);
   const { width } = useWindowDimensions();
-  const size = (width - space.lg * 2 - space.md * (COLUMNS - 1)) / COLUMNS;
+  // Mais colunas com a tela larga (celular deitado, tablet).
+  const columns = gridColumns(width);
+  const size = (width - space.lg * 2 - space.md * (columns - 1)) / columns;
   const albumName = (album: Album) => (album.name === UNKNOWN_ALBUM ? tr('common.unknownAlbum') : album.name);
 
   if (view === 'list') {
@@ -55,9 +57,9 @@ export function AlbumsTab() {
 
   return (
     <FlatList
-      key="grid"
+      key={`grid-${columns}`}
       data={albums}
-      numColumns={COLUMNS}
+      numColumns={columns}
       keyExtractor={(a) => a.id}
       contentContainerStyle={styles.grid}
       columnWrapperStyle={{ gap: space.md }}

@@ -1,7 +1,7 @@
 import { normalize } from './format.ts';
 
 /**
- * Backup do Ritmo: um JSON com playlists, curtidas, histórico, tempo de reprodução,
+ * Backup do Player Downloader: um JSON com playlists, curtidas, histórico, tempo de reprodução,
  * ajustes, edições e letras. Os IDs do MediaStore mudam entre aparelhos (e às vezes
  * depois de formatar), então cada música vai junto com caminho, título, artista e
  * duração para ser reencontrada na restauração.
@@ -60,6 +60,7 @@ export function backupErrorCode(e: unknown): BackupErrorCode | null {
  * Ajustes que não fazem sentido levar para outro aparelho — e os do servidor de downloads, que
  * nunca saem do celular (o backup é compartilhado por WhatsApp/Drive e a chave iria junto).
  */
+// grabServer/grabKey não existem mais, mas ficam aqui para backups antigos não levarem as chaves.
 const LOCAL_SETTINGS = new Set(['onboarded', 'hiddenFolders', 'hiddenTracks', 'grabServer', 'grabKey', 'reportErrors']);
 
 export function createBackup(input: BackupInput): BackupData {
@@ -112,9 +113,9 @@ export function parseBackup(text: string): BackupData {
   } catch {
     throw new BackupError('corrupt', 'O arquivo não é um backup válido (JSON corrompido).');
   }
-  if (!isObject(raw) || raw.format !== BACKUP_FORMAT) throw new BackupError('notBackup', 'Este arquivo não é um backup do Ritmo.');
+  if (!isObject(raw) || raw.format !== BACKUP_FORMAT) throw new BackupError('notBackup', 'Este arquivo não é um backup do Player Downloader.');
   if (typeof raw.version !== 'number' || raw.version > BACKUP_VERSION) {
-    throw new BackupError('newer', 'Este backup foi feito por uma versão mais nova do Ritmo. Atualize o app e tente de novo.');
+    throw new BackupError('newer', 'Este backup foi feito por uma versão mais nova do Player Downloader. Atualize o app e tente de novo.');
   }
 
   const tracks: Record<string, TrackRef> = {};

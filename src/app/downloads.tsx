@@ -9,10 +9,12 @@ import { EmptyState } from '@/components/ui/misc';
 import { Sheet } from '@/components/ui/Sheet';
 import { Text } from '@/components/ui/Text';
 import { useT } from '@/i18n';
-import { cancelDownload, inspectLink, startDownload, type LinkInfo } from '@/lib/downloads';
+import { canRetrySave } from '@/lib/download-jobs';
+import { cancelDownload, clearFinishedDownloads, discardDownload, inspectLink, retrySave, startDownload, type LinkInfo } from '@/lib/downloads';
 import { logError } from '@/lib/errorlog';
 import { formatBytes } from '@/lib/format';
-import { cancelGrab } from '@/lib/grab-queue';
+import { cancelGrab, retryGrab } from '@/lib/grab-queue';
+import { isFinished } from '@/lib/grab-queue-logic';
 import { grabEnabled } from '@/lib/grabber';
 import { audioNameFor } from '@/lib/links';
 import { useDownloads, type DownloadJob } from '@/store/downloads';
@@ -61,10 +63,10 @@ export default function DownloadsScreen() {
     }
   };
 
-  const hasFinished = jobs.some((j) => j.status === 'done' || j.status === 'failed' || j.status === 'cancelled') || tasks.some((task) => task.status === 'error');
+  const hasFinished = jobs.some((j) => j.status === 'done' || j.status === 'failed' || j.status === 'cancelled') || tasks.some((task) => isFinished(task.status));
   const clearFinished = () => {
-    useDownloads.getState().clearFinished();
-    useGrabQueue.getState().clearErrors();
+    clearFinishedDownloads();
+    useGrabQueue.getState().clearFinished();
   };
 
   return (
@@ -103,7 +105,7 @@ export default function DownloadsScreen() {
         data={jobs}
         keyExtractor={(j) => j.id}
         contentContainerStyle={{ padding: space.lg, gap: space.md }}
-        ListHeaderComponent={tasks.length > 0 ? <ServerTasks tasks={tasks} /> : undefined}
+        ListHeaderComponent={tasks.length > 0 ? <LocalGrabTasks tasks={tasks} /> : undefined}
         ListEmptyComponent={tasks.length > 0 ? undefined : <EmptyState icon="download" title={tr('tools.dl.empty')} message={tr('tools.dl.emptyText')} />}
         renderItem={({ item }) => <JobRow job={item} />}
       />
@@ -136,36 +138,78 @@ export default function DownloadsScreen() {
   );
 }
 
-/** O que o servidor ainda está preparando (baixando do site, juntando, convertendo). */
-function ServerTasks({ tasks }: { tasks: GrabTask[] }) {
+/** O que o motor local ainda está preparando (baixando do site, juntando, convertendo). */
+function LocalGrabTasks({ tasks }: { tasks: GrabTask[] }) {
   const tr = useT();
   const colors = useColors();
+
+  const describe = (task: GrabTask) => {
+    const percent = Math.round(Math.min(1, Math.max(0, task.progress)) * 100);
+    switch (task.status) {
+      case 'queued':
+        return tr('tools.grab.queued');
+      case 'downloading':
+        return tr('tools.grab.downloading', { n: percent });
+      case 'converting':
+        return tr('tools.grab.converting', { n: percent });
+      case 'saving':
+        return tr('tools.grab.saving');
+      case 'ready':
+        return tr('tools.grab.ready');
+      case 'done':
+        return tr('tools.grab.done');
+      case 'cancelled':
+        return tr('tools.grab.cancelled');
+      case 'error':
+        return task.error || tr('tools.grab.failed');
+    }
+  };
+
   return (
     <View style={{ gap: space.md }}>
       <Text variant="label" muted>
         {tr('tools.grab.serverQueue')}
       </Text>
-      {tasks.map((task) => (
-        <View key={task.id} style={[styles.job, { backgroundColor: colors.surface }]}>
-          <View style={styles.row}>
-            <Icon name={task.status === 'error' ? 'error' : 'cloud_download'} color={task.status === 'error' ? colors.danger : colors.primary} />
-            <View style={{ flex: 1, gap: 2 }}>
-              <Text variant="label" numberOfLines={1}>
-                {task.title}
-              </Text>
-              <Text variant="caption" muted numberOfLines={2}>
-                {task.status === 'error'
-                  ? task.error
-                  : task.status === 'queued'
-                    ? tr('tools.grab.queued')
-                    : `${task.stage ?? ''} · ${Math.round(task.progress * 100)}%`}
-              </Text>
+      {tasks.map((task) => {
+        const failed = task.status === 'error';
+        const finished = task.status === 'done';
+        const icon = failed ? 'error' : finished ? 'check_circle' : task.status === 'cancelled' ? 'close' : 'cloud_download';
+        return (
+          <View key={task.id} style={[styles.job, { backgroundColor: colors.surface }]}>
+            <View style={styles.row}>
+              <Icon name={icon} color={failed ? colors.danger : colors.primary} />
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text variant="label" numberOfLines={1}>
+                  {task.title}
+                </Text>
+                <Text variant="caption" muted numberOfLines={2}>
+                  {describe(task)}
+                </Text>
+              </View>
+              {failed ? (
+                <IconButton icon="delete" label={tr('common.remove')} onPress={() => cancelGrab(task)} />
+              ) : finished || task.status === 'cancelled' ? (
+                <IconButton icon="delete" label={tr('common.remove')} onPress={() => cancelGrab(task)} />
+              ) : (
+                <IconButton icon="close" label={tr('common.cancel')} onPress={() => cancelGrab(task)} />
+              )}
             </View>
-            <IconButton icon={task.status === 'error' ? 'delete' : 'close'} label={task.status === 'error' ? tr('common.remove') : tr('common.cancel')} onPress={() => cancelGrab(task)} />
+            {failed && (
+              <Button
+                label={tr('common.retry')}
+                icon="refresh"
+                variant="tonal"
+                compact
+                onPress={() => void retryGrab(task)}
+                style={{ alignSelf: 'flex-start' }}
+              />
+            )}
+            {(task.status === 'downloading' || task.status === 'converting') && (
+              <ProgressBar value={Math.min(1, Math.max(0, task.progress))} />
+            )}
           </View>
-          {(task.status === 'downloading' || task.status === 'converting') && <ProgressBar value={task.progress} />}
-        </View>
-      ))}
+        );
+      })}
     </View>
   );
 }
@@ -179,7 +223,7 @@ function JobRow({ job }: { job: DownloadJob }) {
     saving: tr('tools.dl.saving'),
     converting: tr('tools.convert.working', { n: Math.round(job.progress * 100) }),
     done: tr('tools.dl.done'),
-    failed: job.error ?? tr('tools.dl.failedShort'),
+    failed: canRetrySave(job) ? tr('tools.dl.savePending', { error: job.error ?? tr('tools.dl.failedShort') }) : (job.error ?? tr('tools.dl.failedShort')),
     cancelled: tr('tools.dl.cancelled'),
   }[job.status];
   const busy = job.status === 'running' || job.status === 'saving' || job.status === 'converting';
@@ -203,10 +247,15 @@ function JobRow({ job }: { job: DownloadJob }) {
           job.status !== 'saving' && <IconButton icon="close" label={tr('common.cancel')} onPress={() => cancelDownload(job)} />
         ) : (
           <>
-            {(job.status === 'failed' || job.status === 'cancelled') && (
-              <IconButton icon="refresh" label={tr('common.retry')} onPress={() => retry(job)} />
+            {canRetrySave(job) ? (
+              // O arquivo já foi baixado: só falta salvar (ex.: depois de liberar espaço).
+              <IconButton icon="download" label={tr('tools.dl.retrySave')} onPress={() => retrySave(job)} />
+            ) : (
+              (job.status === 'failed' || job.status === 'cancelled') && (
+                <IconButton icon="refresh" label={tr('common.retry')} onPress={() => retry(job)} />
+              )
             )}
-            <IconButton icon="delete" label={tr('common.remove')} onPress={() => useDownloads.getState().remove(job.id)} />
+            <IconButton icon="delete" label={tr('common.remove')} onPress={() => discardDownload(job)} />
           </>
         )}
       </View>
@@ -216,7 +265,8 @@ function JobRow({ job }: { job: DownloadJob }) {
 }
 
 function retry(job: DownloadJob) {
-  useDownloads.getState().remove(job.id);
+  // Baixa de novo do zero: o que sobrou da tentativa anterior sai antes.
+  discardDownload(job);
   try {
     startDownload({ kind: 'media', url: job.url, media: job.media, name: job.name, mime: null, size: job.total }, job.action, job.bitrate);
   } catch (e) {

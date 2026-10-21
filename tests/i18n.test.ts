@@ -4,13 +4,14 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { common } from '../src/i18n/parts/common.ts';
+import { extras } from '../src/i18n/parts/extras.ts';
 import { ios } from '../src/i18n/parts/ios.ts';
 import { library } from '../src/i18n/parts/library.ts';
 import { player } from '../src/i18n/parts/player.ts';
 import { settings } from '../src/i18n/parts/settings.ts';
 import { tools } from '../src/i18n/parts/tools.ts';
 
-const parts = { common, library, player, settings, ios, tools } as Record<string, { pt: Record<string, string>; en: Record<string, string>; es: Record<string, string> }>;
+const parts = { common, library, player, settings, ios, tools, extras } as Record<string, { pt: Record<string, string>; en: Record<string, string>; es: Record<string, string> }>;
 const vars = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
 
 describe('idiomas', () => {

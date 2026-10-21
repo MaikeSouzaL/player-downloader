@@ -6,4 +6,7 @@
   <string name="ritmo_widget_previous">Anterior</string>
   <string name="ritmo_widget_play">Reproducir o pausar</string>
   <string name="ritmo_widget_next">Siguiente</string>
+  <string name="ritmo_bubble_open_controls">Burbuja de Player Downloader: toca para ver los controles</string>
+  <string name="ritmo_bubble_open_app">Abrir Player Downloader</string>
+  <string name="ritmo_bubble_close">Cerrar la burbuja</string>
 </resources>

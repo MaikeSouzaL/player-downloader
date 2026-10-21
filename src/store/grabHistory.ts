@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 
 import { persistStorage } from '@/store/storage';
 
-/** Link já lido no servidor, guardado para baixar de novo sem colar tudo outra vez. */
+/** Link já lido no aparelho, guardado para baixar de novo sem colar tudo outra vez. */
 export type GrabRecent = {
   url: string;
   title: string;

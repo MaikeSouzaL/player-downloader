@@ -91,7 +91,8 @@ function restorableSettings(raw: Record<string, unknown>) {
   const current = useSettings.getState();
   const patch: Record<string, unknown> = {};
   if (oneOf(raw.theme, ['system', 'light', 'dark'] as const)) patch.theme = raw.theme;
-  if (typeof raw.accent === 'string' && raw.accent in ACCENTS) patch.accent = raw.accent;
+  // hasOwn: "constructor", "toString" etc. também estão "in" um objeto e quebrariam o tema.
+  if (typeof raw.accent === 'string' && Object.hasOwn(ACCENTS, raw.accent)) patch.accent = raw.accent;
   if (oneOf(raw.language, ['system', 'pt', 'en', 'es'] as const)) patch.language = raw.language;
   if (oneOf(raw.albumView, ['grid', 'list'] as const)) patch.albumView = raw.albumView;
   if (oneOf(raw.videoView, ['grid', 'list'] as const)) patch.videoView = raw.videoView;
@@ -144,7 +145,7 @@ export async function exportBackup(): Promise<void> {
     lyrics: await customLyrics(),
     library: useLibrary.getState().allTracks,
   });
-  await shareFile(`ritmo-backup-${dayKey()}.json`, JSON.stringify(data), 'application/json', t('settings.backupShareTitle'));
+  await shareFile(`PlayerDownloader-backup-${dayKey()}.json`, JSON.stringify(data), 'application/json', t('settings.backupShareTitle'));
 }
 
 /** Restaura um backup escolhido pelo usuário, mesclando com o que já existe. Devolve um resumo. */

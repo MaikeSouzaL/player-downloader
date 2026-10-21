@@ -10,6 +10,7 @@ import { Icon, type IconName } from '@/components/ui/Icon';
 import { EmptyState } from '@/components/ui/misc';
 import { Text } from '@/components/ui/Text';
 import { useT } from '@/i18n';
+import { haptic } from '@/lib/haptics';
 import type { Track } from '@/lib/library';
 import { useExternalTracks } from '@/store/external-tracks';
 import { useLibrary } from '@/store/library';
@@ -45,7 +46,12 @@ const QueueRow = memo(function QueueRow({ item, current, isPlaying, draggable }:
         <IconButton icon="close" label={tr('player.queue.removeItem', { title: item.track.title })} color={colors.textWeak} size={20} onPress={() => p.removeAt(item.queueIndex)} />
       )}
       {draggable && (
-        <Pressable onPressIn={drag} hitSlop={8} accessibilityRole="button" accessibilityLabel={tr('player.queue.drag', { title: item.track.title })} style={styles.handle}>
+        <Pressable
+          onPressIn={() => {
+            haptic('drag');
+            drag();
+          }}
+          hitSlop={8} accessibilityRole="button" accessibilityLabel={tr('player.queue.drag', { title: item.track.title })} style={styles.handle}>
           <Icon name="drag_indicator" color={colors.textWeak} />
         </Pressable>
       )}

@@ -94,7 +94,7 @@ object Vault {
 
   fun list(context: Context): List<Map<String, Any?>> = synchronized(lock) { read(context).map { toMap(context, it) } }
 
-  /** Devolve à biblioteca (Music/Ritmo ou Movies/Ritmo) e tira da pasta privada. */
+  /** Devolve à biblioteca (Music/Player Downloader ou Movies/Player Downloader) e tira da pasta privada. */
   fun restore(context: Context, id: String): String = synchronized(lock) {
     val items = read(context)
     val item = items.firstOrNull { it.getString("id") == id } ?: throw IllegalArgumentException("Item não encontrado")

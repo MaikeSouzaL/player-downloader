@@ -5,7 +5,7 @@ import UIKit
 
 /**
  * Biblioteca do iOS. O iPhone não deixa apps lerem as pastas de música, então as músicas vêm de:
- *  - arquivos importados para a pasta do app (Arquivos › No meu iPhone › Ritmo, Finder/iTunes ou "Importar");
+ *  - arquivos importados para a pasta do app (Arquivos › No meu iPhone › Player Downloader, Finder/iTunes ou "Importar");
  *  - app Música (músicas sincronizadas do computador; itens com DRM/streaming não têm `assetURL` e ficam de fora).
  *
  * IDs: "f:<caminho relativo em Documents>" para arquivos e "m:<persistentID>" para o app Música.

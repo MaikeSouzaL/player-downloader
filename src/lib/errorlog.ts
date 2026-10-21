@@ -4,8 +4,8 @@ import { Platform } from 'react-native';
 
 /**
  * Registro de erros local (Ajustes › Sobre › Registro de erros). Quem quiser também recebe cada
- * erro na hora (`onErrorLogged`): é assim que o relatório chega ao servidor do Ritmo
- * (`lib/error-report.ts`, desligável em Ajustes › Servidor de downloads).
+ * erro na hora (`onErrorLogged`); o relatório é montado no próprio aparelho e nunca é enviado
+ * para fora (`lib/error-report.ts`).
  */
 const MAX_BYTES = 200_000;
 
@@ -103,7 +103,7 @@ export async function errorLogForSharing(): Promise<string | null> {
     `Gerado em ${new Date().toISOString()}`,
     '',
   ].join('\n');
-  const out = new File(Paths.cache, 'ritmo-erros.txt');
+  const out = new File(Paths.cache, 'PlayerDownloader-erros.txt');
   if (out.exists) out.delete();
   out.create();
   await out.write(header + body);

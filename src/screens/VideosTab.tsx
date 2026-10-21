@@ -13,6 +13,7 @@ import { Text } from '@/components/ui/Text';
 import RitmoCore, { type NativeVideo } from '@/modules/ritmo-core';
 import { localPath, useT } from '@/i18n';
 import { folderName, formatBytes, formatDuration } from '@/lib/format';
+import { gridColumns } from '@/lib/layout';
 import { sortVideos } from '@/lib/library';
 import { moveVideosToVault } from '@/lib/vault';
 import { useLibrary } from '@/store/library';
@@ -105,18 +106,19 @@ export function VideoList({ videos }: { videos: NativeVideo[] }) {
   const colors = useColors();
   const view = useSettings((s) => s.videoView);
   const { width } = useWindowDimensions();
+  const columns = gridColumns(width);
   const [menu, setMenu] = useState<NativeVideo | null>(null);
   const open = (v: NativeVideo) => router.push({ pathname: '/video/[id]', params: { id: v.id } });
   const actions = <VideoActions video={menu} onClose={() => setMenu(null)} />;
 
   if (view === 'grid') {
-    const cell = (width - space.lg * 2 - space.md) / 2;
+    const cell = (width - space.lg * 2 - space.md * (columns - 1)) / columns;
     return (
       <>
         <FlatList
-          key="grid"
+          key={`grid-${columns}`}
           data={videos}
-          numColumns={2}
+          numColumns={columns}
           keyExtractor={(v) => v.id}
           contentContainerStyle={{ padding: space.lg, gap: space.lg }}
           columnWrapperStyle={{ gap: space.md }}

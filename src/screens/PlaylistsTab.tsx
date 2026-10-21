@@ -51,8 +51,8 @@ export function PlaylistsTab() {
     const existing = (ids: string[]) => ids.filter((id) => byId.has(id)).length;
     return [
       { kind: 'smart', id: 'liked', title: 'library.smart.liked', icon: 'favorite', count: existing(liked), tint: '#F44F5E' },
-      { kind: 'smart', id: 'recent', title: 'library.smart.recent', icon: 'history', count: existing(recent), tint: '#2596FF' },
-      { kind: 'smart', id: 'top', title: 'library.smart.top', icon: 'trending_up', count: existing(Object.keys(plays)), tint: '#FB7746' },
+      { kind: 'smart', id: 'recent', title: 'library.smart.recent', icon: 'history', count: existing(recent), tint: '#FD7846' },
+      { kind: 'smart', id: 'top', title: 'library.smart.top', icon: 'trending_up', count: existing(Object.keys(plays)), tint: '#D84B22' },
       { kind: 'new' },
       ...playlists.map((p) => ({
         kind: 'user' as const,

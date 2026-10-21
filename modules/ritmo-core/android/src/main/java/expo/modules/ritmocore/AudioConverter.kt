@@ -30,7 +30,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  *  - bitrate 0 ("Original"): copia a faixa de áudio que já está no vídeo, sem recodificar (rápido e sem perda),
  *    quando ela é AAC; senão recodifica a 192 kbps.
  *  - 96/128/192/256 kbps: recodifica com o Transformer do media3 nessa qualidade.
- * O resultado vai para Music/Ritmo pela MediaSaver. Progresso de 0 a 100 pelo callback.
+ * O resultado vai para Music/Player Downloader pela MediaSaver. Progresso de 0 a 100 pelo callback.
  */
 @UnstableApi
 object AudioConverter {

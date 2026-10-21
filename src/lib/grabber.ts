@@ -1,12 +1,19 @@
+import { Platform } from 'react-native';
+
 import { t } from '@/i18n';
-import { logError } from '@/lib/errorlog';
-import { errorMessage } from '@/lib/errors';
-import { useSettings } from '@/store/settings';
+import { withTimeout } from '@/lib/timeout';
+import RitmoCore from '@/modules/ritmo-core';
 
 /**
- * Ponte com o servidor do Ritmo (pasta `backend/`): o yt-dlp roda no PC/VPS e devolve
- * as qualidades; o celular baixa o arquivo pronto pelo DownloadManager/URLSession.
+ * Download no próprio aparelho: yt-dlp embutido e aceleração nativa em cada plataforma.
+ * Não há servidor, chave, cookies nem requisições para Render: o celular fala direto com o site
+ * e baixa pela conexão do usuário (Wi‑Fi ou 4G).
  */
+
+/** O botão "Baixar" não pode ficar travado se o motor não responder ao criar o job. */
+const START_TIMEOUT_MS = 30_000;
+/** O poller da fila não pode ficar preso numa promessa nativa. */
+const STATUS_TIMEOUT_MS = 20_000;
 
 export type GrabFormat = {
   id: string;
@@ -51,7 +58,7 @@ export type GrabMedia = {
   subtitles: GrabSubtitle[];
 };
 
-export type GrabStatus = 'queued' | 'downloading' | 'converting' | 'ready' | 'error' | 'cancelled';
+export type GrabStatus = 'queued' | 'downloading' | 'converting' | 'saving' | 'done' | 'ready' | 'error' | 'cancelled';
 
 export type GrabJob = {
   id: string;
@@ -60,8 +67,11 @@ export type GrabJob = {
   stage?: string;
   title?: string;
   entryId?: string;
+  /** O motor pode mandar a URL do job (versões novas); sem ela usamos o entryId/URL da página. */
+  url?: string;
   error?: string;
   code?: string;
+  /** O arquivo já foi salvo na biblioteca do aparelho. */
   file?: { name: string; mime: string; size: number };
 };
 
@@ -69,169 +79,89 @@ export type GrabStarted = {
   id: string;
   ids: string[];
   batchId?: string;
-  jobs?: { id: string; entryId: string; title: string }[];
+  jobs?: { id: string; entryId: string; title: string; url?: string }[];
 };
 
-/** Sem barra no fim e com esquema: "192.168.0.10:8787" → "http://192.168.0.10:8787". */
-export function normalizeServer(value: string): string {
-  let server = value.trim();
-  if (!server) return '';
-  if (!/^https?:\/\//i.test(server)) server = `http://${server}`;
-  return server.replace(/\/+$/, '');
-}
-
 /**
- * Servidor que já vem no app (EXPO_PUBLIC_GRAB_SERVER/EXPO_PUBLIC_GRAB_KEY no `.env.local`, lidos no
- * build). Vale enquanto o endereço em Ajustes estiver em branco.
+ * Motor local: Android (yt-dlp/FFmpeg) e iOS (yt-dlp embutido + URLSession/AVFoundation).
+ * O iPhone precisa de iOS 16.4+ e do build nativo; no Expo Go não existe.
  */
-export const DEFAULT_SERVER = normalizeServer(process.env.EXPO_PUBLIC_GRAB_SERVER ?? '');
-const DEFAULT_KEY = (process.env.EXPO_PUBLIC_GRAB_KEY ?? '').trim();
-
-/** Endereço e chave que valem para o que foi digitado (em branco = o servidor do app). */
-export function resolveServer(server: string, key: string): { url: string; key: string } {
-  const url = normalizeServer(server) || DEFAULT_SERVER;
-  // A chave embutida só vai para o servidor embutido: um endereço digitado nunca recebe ela.
-  return { url, key: key.trim() || (url === DEFAULT_SERVER ? DEFAULT_KEY : '') };
-}
-
-export function serverUrl(): string {
-  return resolveServer(useSettings.getState().grabServer, '').url;
-}
-
-export function serverKey(): string {
-  const { grabServer, grabKey } = useSettings.getState();
-  return resolveServer(grabServer, grabKey).key;
-}
-
-/** Servidor configurado? Enquanto não estiver, o app continua bloqueando YouTube e redes sociais. */
 export function grabEnabled(): boolean {
-  return /^https?:\/\/[^/]+/i.test(serverUrl());
-}
-
-function friendly(e: unknown): Error {
-  const err = e as Error;
-  if (err?.name === 'AbortError') return new Error(t('tools.grab.timeout'));
-  if (err instanceof Error && err.message && !/network request failed/i.test(err.message)) return err;
-  return new Error(t('tools.grab.network'));
-}
-
-async function request<T>(base: string, key: string, path: string, init: RequestInit = {}, timeout = 30_000): Promise<T> {
-  if (!base) throw new Error(t('tools.grab.noServer'));
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
+  if (Platform.OS !== 'android' && Platform.OS !== 'ios') return false;
   try {
-    const res = await fetch(`${base}${path}`, {
-      ...init,
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        ...(key ? { 'X-Ritmo-Key': key } : {}),
-        ...(init.headers ?? {}),
-      },
-      signal: controller.signal,
-    });
-    const text = await res.text();
-    let data: unknown = null;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      // Servidor errado (HTML) ou proxy: a mensagem genérica é melhor que "Unexpected token".
-    }
-    if (!res.ok) {
-      const detail = (data as { detail?: unknown } | null)?.detail;
-      throw new Error(typeof detail === 'string' ? detail : t('tools.grab.badResponse', { code: res.status }));
-    }
-    if (data === null) throw new Error(t('tools.grab.badResponse', { code: res.status }));
-    return data as T;
-  } catch (e) {
-    throw friendly(e);
-  } finally {
-    clearTimeout(timer);
+    return typeof RitmoCore.grabAvailable === 'function' && RitmoCore.grabAvailable();
+  } catch {
+    return false;
   }
 }
 
-function call<T>(path: string, init: RequestInit = {}, timeout = 30_000): Promise<T> {
-  return request<T>(serverUrl(), serverKey(), path, init, timeout);
-}
-
 /**
- * Lê o link no servidor (metadados + qualidades). Pode demorar: o yt-dlp consulta o site e,
- * se o site mudou, o servidor se atualiza e tenta de novo. `playlist` lê a playlist inteira.
+ * Lê o link no próprio aparelho (metadados + qualidades). A primeira chamada pode demorar:
+ * o yt-dlp embutido está inicializando. `playlist` lê a playlist inteira.
  */
 export function resolveLink(url: string, playlist = false): Promise<GrabMedia> {
-  return call<GrabMedia>('/resolve', { method: 'POST', body: JSON.stringify({ url, playlist }) }, 180_000);
+  const timeout = playlist ? 120_000 : 60_000;
+  return withTimeout(RitmoCore.grabResolve(url, playlist) as unknown as Promise<GrabMedia>, timeout, t('tools.grab.timeout'));
 }
 
 export type GrabSearchItem = GrabEntry;
 
-/** Busca no YouTube pelo servidor (a lupa do SnapTube). */
+/** Busca no YouTube pelo yt-dlp do aparelho (a lupa do SnapTube). */
 export function searchVideos(query: string): Promise<{ items: GrabSearchItem[] }> {
-  return call<{ items: GrabSearchItem[] }>(`/search?q=${encodeURIComponent(query)}&limit=15`, {}, 180_000);
-}
-
-/** Cria o download no servidor. Playlist: `entries` com os vídeos escolhidos (vazio = todos). */
-export function startJob(token: string, formatId: string, options: { subtitles?: string | null; entries?: string[] } = {}): Promise<GrabStarted> {
-  return call<GrabStarted>('/download', {
-    method: 'POST',
-    body: JSON.stringify({ token, formatId, subtitles: options.subtitles ?? null, entries: options.entries ?? null }),
-  });
-}
-
-export function jobStatus(id: string): Promise<GrabJob> {
-  return call<GrabJob>(`/job/${encodeURIComponent(id)}`, {}, 15_000);
-}
-
-/** Vários de uma vez (playlist). Os que o servidor não conhece mais vêm em `missing`. */
-export function jobsStatus(ids: string[]): Promise<{ jobs: GrabJob[]; missing: string[] }> {
-  return call<{ jobs: GrabJob[]; missing: string[] }>(`/jobs?ids=${ids.map(encodeURIComponent).join(',')}`, {}, 15_000);
-}
-
-/** Cancela no servidor, ou avisa que o arquivo já foi salvo (o servidor apaga o temporário). */
-export async function cancelJob(id: string): Promise<void> {
-  try {
-    await call(`/job/${encodeURIComponent(id)}`, { method: 'DELETE' }, 10_000);
-  } catch (e) {
-    logError('Servidor: cancelar', e);
-  }
-}
-
-/**
- * URL que o download nativo usa. Sem a chave: o ID do download já é secreto (128 bits), e assim a
- * chave não fica gravada no histórico de downloads do Android.
- */
-export function jobFileUrl(id: string): string {
-  return `${serverUrl()}/file/${encodeURIComponent(id)}`;
-}
-
-/** ID do download no servidor, se a URL for de um arquivo dele. */
-export function serverJobId(url: string): string | null {
-  const match = /\/file\/([0-9a-f]{32})(?:[?#]|$)/i.exec(url);
-  if (!match) return null;
-  const base = serverUrl();
-  return base && url.startsWith(`${base}/`) ? match[1] : null;
-}
-
-export type ServerHealth = { ytdlp: string; ffmpeg: boolean; node: boolean; version?: string; autoUpdate: boolean };
-
-export async function testServer(server: string, key: string): Promise<ServerHealth> {
-  const target = resolveServer(server, key);
-  const data = await request<{ ytdlp?: string; ffmpeg?: boolean; node?: boolean; version?: string; update?: { autoUpdate?: boolean } }>(
-    target.url,
-    target.key,
-    '/health',
-    {},
-    // Servidor na nuvem (Render grátis) dorme sem uso e leva cerca de 1 minuto para acordar.
-    90_000
+  return withTimeout(
+    RitmoCore.grabSearch(query, 15) as unknown as Promise<{ items: GrabSearchItem[] }>,
+    45_000,
+    t('tools.grab.timeout')
   );
-  return { ytdlp: data.ytdlp ?? '?', ffmpeg: !!data.ffmpeg, node: !!data.node, version: data.version, autoUpdate: data.update?.autoUpdate !== false };
 }
 
-/** Pede ao servidor para atualizar o yt-dlp agora (pode levar um minuto). */
-export async function updateServer(server: string, key: string): Promise<{ updated: boolean; ytdlp: string }> {
-  const target = resolveServer(server, key);
+export type StartOptions = {
+  subtitles?: string | null;
+  /** Playlist: os vídeos escolhidos, com URL (o motor local baixa cada um). */
+  videos?: GrabEntry[];
+  /** O formato de vídeo escolhido já tem áudio? Evita baixar/duplicar a faixa. */
+  hasAudio?: boolean;
+  title?: string;
+  kind?: 'video' | 'audio';
+};
+
+/** Enfileira o download no motor local. Devolve os IDs para acompanhar o progresso. */
+export function startJob(url: string, formatId: string, options: StartOptions = {}): Promise<GrabStarted> {
+  const payload = JSON.stringify({
+    subtitles: options.subtitles ?? null,
+    videos: (options.videos ?? []).map((entry) => ({ id: entry.id, url: entry.url, title: entry.title })),
+    hasAudio: !!options.hasAudio,
+    title: options.title ?? '',
+    kind: options.kind ?? 'video',
+  });
+  return withTimeout(
+    RitmoCore.grabStart(url, formatId, payload) as unknown as Promise<GrabStarted>,
+    START_TIMEOUT_MS,
+    t('tools.grab.timeout')
+  );
+}
+
+/** Vários de uma vez (playlist). Os que o motor não conhece mais vêm em `missing`. */
+export function jobsStatus(ids: string[]): Promise<{ jobs: GrabJob[]; missing: string[] }> {
+  return withTimeout(
+    RitmoCore.grabJobs(ids) as unknown as Promise<{ jobs: GrabJob[]; missing: string[] }>,
+    STATUS_TIMEOUT_MS,
+    t('tools.grab.timeout')
+  );
+}
+
+export async function jobStatus(id: string): Promise<GrabJob> {
+  const { jobs } = await jobsStatus([id]);
+  const job = jobs[0];
+  if (!job) throw new Error(t('tools.grab.lost'));
+  return job;
+}
+
+/** Cancela o processo do yt-dlp no aparelho. */
+export function cancelJob(id: string): void {
   try {
-    return await request<{ updated: boolean; ytdlp: string }>(target.url, target.key, '/update', { method: 'POST' }, 600_000);
-  } catch (e) {
-    throw new Error(errorMessage(e));
+    RitmoCore.grabCancel(id);
+  } catch {
+    // processo já terminou
   }
 }

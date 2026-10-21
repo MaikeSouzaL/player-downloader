@@ -1,6 +1,5 @@
 # O EAS usa este arquivo NO LUGAR dos .gitignore (inclusive os das subpastas).
-# Igual ao .gitignore, com duas diferenças: o .env.local vai junto (endereço e chave do
-# servidor embutidos no app) e a pasta backend/ fica de fora (o build do iPhone não usa).
+# Igual ao .gitignore, mais a pasta backend/ fora (o build do iPhone não usa).
 
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
@@ -34,6 +33,14 @@ yarn-error.*
 .DS_Store
 *.pem
 
+# O certifi é o bundle de CAs usado pelo HTTPS do yt-dlp; não é chave privada.
+!modules/ritmo-core/ios/Python/app_packages/certifi/cacert.pem
+
+# bytecode gerado por testes locais (o build não precisa e pode ficar grande)
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
 
 # typescript
 *.tsbuildinfo
@@ -51,6 +58,17 @@ modules/*/android/.cxx/
 *.apk
 *.aab
 *.ipa
+*.tar.gz
+
+# arquivos de ambiente locais
+.env*.local
 
 # servidor (não entra no app)
 backend/
+
+# documentação e ferramentas locais (não entram no build)
+/build-apk.ps1
+/scripts/
+/AGENTS.md
+/.claude/
+/.vscode/

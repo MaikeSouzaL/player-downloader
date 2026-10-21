@@ -9,8 +9,10 @@ import { usePlayer } from '@/store/player';
 import { useColors } from '@/theme';
 
 /** Barra de progresso com tempo atual e total (pgs_current / pgs_total do Lark). */
-export function SeekBar() {
+/** `color`: destaque da barra (o player usa a cor da capa); padrão, a cor do tema. */
+export function SeekBar({ color }: { color?: string } = {}) {
   const colors = useColors();
+  const accent = color ?? colors.primary;
   const tr = useT();
   const position = usePlayer((s) => s.position);
   const duration = usePlayer((s) => s.duration);
@@ -24,9 +26,9 @@ export function SeekBar() {
         value={Math.min(shown, duration || 0)}
         minimumValue={0}
         maximumValue={Math.max(1, duration)}
-        minimumTrackTintColor={colors.primary}
+        minimumTrackTintColor={accent}
         maximumTrackTintColor={colors.textWeak}
-        thumbTintColor={colors.primary}
+        thumbTintColor={accent}
         tapToSeek
         onSlidingStart={(v) => setDragging(v)}
         onValueChange={(v) => dragging != null && setDragging(v)}

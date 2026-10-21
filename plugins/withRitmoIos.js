@@ -1,4 +1,4 @@
-const { withEntitlementsPlist, withInfoPlist } = require('expo/config-plugins');
+const { withEntitlementsPlist, withInfoPlist, withXcodeProject } = require('expo/config-plugins');
 
 /**
  * Ajustes do iOS que o app.json não cobre.
@@ -93,8 +93,26 @@ function withLocalServer(config) {
   });
 }
 
+/**
+ * O expo-widgets cria a extensão do widget com o nome do alvo ("ExpoWidgetsTarget"), que era o nome mostrado
+ * dela. Troca pelo nome do app. Roda depois do plugin do widget (mods do mesmo tipo vão do último registrado
+ * para o primeiro). Entre aspas: valor com espaço sem aspas no project.pbxproj quebra o CocoaPods.
+ */
+function withWidgetDisplayName(config) {
+  return withXcodeProject(config, (cfg) => {
+    const name = `"${cfg.name}"`;
+    for (const entry of Object.values(cfg.modResults.pbxXCBuildConfigurationSection())) {
+      const settings = entry && typeof entry === 'object' ? entry.buildSettings : undefined;
+      const plist = typeof settings?.INFOPLIST_FILE === 'string' ? settings.INFOPLIST_FILE.replace(/"/g, '') : '';
+      if (plist.startsWith('ExpoWidgetsTarget/')) settings.INFOPLIST_KEY_CFBundleDisplayName = name;
+    }
+    return cfg;
+  });
+}
+
 module.exports = function withRitmoIos(config, { carPlay = false } = {}) {
   config = withVideoRotation(config);
+  config = withWidgetDisplayName(config);
   config = withLocalServer(config);
   if (carPlay) config = withCarPlay(config);
   return config;

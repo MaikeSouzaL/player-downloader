@@ -69,6 +69,22 @@ final class RitmoPlayer: NSObject {
   private var sleepTimer: Timer?
   private static let fadeSeconds: TimeInterval = 20
 
+  // Volume final = timer para dormir × transição entre músicas × ReplayGain (no mixer principal:
+  // o nó passa pela velocidade e pelo equalizador antes, e o volume do nó só vale ligado a um mixer).
+  private var sleepFactor: Float = 1
+  private var fadeFactor: Float = 1
+  private var gainFactor: Float = 1
+  private var tuning = PlaybackTuningIOS.load()
+  private var fadeInStart: Date?
+  /// A música anterior saiu abaixando o volume: a próxima entra subindo.
+  private var fadeInNext = false
+  /// Duração da subida: a transição inteira no fim da música, curta (até 1 s) quando a troca foi na mão.
+  private var fadeInMs: Double = 0
+  private var fadeInNextMs: Double = 0
+  private var manualFadeTimer: Timer?
+  private var manualAction: (() -> Void)?
+  private var transitionTimer: Timer?
+
   private override init() {
     super.init()
     engine.attach(node)
@@ -84,6 +100,7 @@ final class RitmoPlayer: NSObject {
     center.addObserver(self, selector: #selector(onEngineConfigChange(_:)), name: .AVAudioEngineConfigurationChange, object: engine)
     center.addObserver(self, selector: #selector(onMediaServicesReset(_:)), name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
     Equalizer.restoreSaved(into: eq)
+    restartTransitionTimer()
   }
 
   // MARK: - Estado para o JS
@@ -218,16 +235,25 @@ final class RitmoPlayer: NSObject {
 
   func skip(to i: Int) {
     guard items.indices.contains(i) else { return }
-    load(index: i, positionMs: 0, play: true)
+    fadeOutThen { [weak self] in
+      guard let self, self.items.indices.contains(i) else { return }
+      self.load(index: i, positionMs: 0, play: true)
+    }
   }
 
   func next() {
-    guard let target = nextIndex(wrap: repeatMode != "off") else { return }
-    load(index: target, positionMs: 0, play: playWhenReady)
+    fadeOutThen { [weak self] in
+      guard let self, let target = self.nextIndex(wrap: self.repeatMode != "off") else { return }
+      self.load(index: target, positionMs: 0, play: self.playWhenReady)
+    }
+  }
+
+  func previous() {
+    fadeOutThen { [weak self] in self?.performPrevious() }
   }
 
   /// Volta ao começo se já tocou mais de 3 s; senão vai para a anterior (como o media3).
-  func previous() {
+  private func performPrevious() {
     if positionMs > 3000 || items.count <= 1 {
       seek(toMs: 0)
       return
@@ -362,6 +388,10 @@ final class RitmoPlayer: NSObject {
     }
     setupRemoteCommandsIfNeeded()
     stopNode()
+    if !fadeInNext {
+      fadeFactor = 1
+      fadeInStart = nil
+    }
     loadToken += 1
     let token = loadToken
     index = newIndex
@@ -385,6 +415,14 @@ final class RitmoPlayer: NSObject {
           try self.connect(format: audioFile.processingFormat)
           self.file = audioFile
           self.status = "ready"
+          self.gainFactor = ReplayGainIOS.factor(url: url, tuning: self.tuning)
+          if self.fadeInNext && self.playWhenReady {
+            self.fadeFactor = 0
+            self.fadeInStart = Date()
+            self.fadeInMs = self.fadeInNextMs
+          }
+          self.fadeInNext = false
+          self.applyVolume()
           self.schedule(fromMs: positionMs)
           if self.playWhenReady { self.startEngineAndNode() }
           // Título e capa já foram montados no começo do carregamento; aqui só os tempos mudam.
@@ -456,6 +494,8 @@ final class RitmoPlayer: NSObject {
 
   private func itemFinished(_ token: Int) {
     guard token == scheduleToken, file != nil else { return }
+    fadeInNext = tuning.crossfadeMs > 0 && fadeFactor < 0.98
+    fadeInNextMs = tuning.crossfadeMs
     if sleepEndOfTrack {
       // Timer "fim da faixa": avança para a próxima, mas pausada.
       finishSleep()
@@ -716,7 +756,8 @@ final class RitmoPlayer: NSObject {
     sleepTimer = nil
     sleepAt = nil
     sleepEndOfTrack = false
-    engine.mainMixerNode.outputVolume = 1
+    sleepFactor = 1
+    applyVolume()
   }
 
   private func sleepTick() {
@@ -726,13 +767,124 @@ final class RitmoPlayer: NSObject {
       pause()
       finishSleep()
     } else if left < Self.fadeSeconds {
-      engine.mainMixerNode.outputVolume = Float(max(0.05, left / Self.fadeSeconds))
+      sleepFactor = Float(max(0.05, left / Self.fadeSeconds))
+      applyVolume()
     }
   }
 
   private func finishSleep() {
     cancelSleepTimer()
     onSleepTimer?(sleepState(fired: true))
+  }
+
+  // MARK: - Transição suave e volume igualado
+
+  private func applyVolume() {
+    engine.mainMixerNode.outputVolume = max(0, min(1, sleepFactor * fadeFactor * gainFactor))
+  }
+
+  /// Ajustes vindos do JS (pular silêncio não existe no iPhone).
+  func setTuning(crossfadeMs: Double, gaplessAlbums: Bool, replayGain: String, preampDb: Double) {
+    tuning = PlaybackTuningIOS(
+      crossfadeMs: max(0, min(12_000, crossfadeMs)), gaplessAlbums: gaplessAlbums,
+      replayGain: ["track", "album"].contains(replayGain) ? replayGain : "off", preampDb: max(-6, min(6, preampDb)))
+    tuning.save()
+    gainFactor = ReplayGainIOS.factor(url: file?.url, tuning: tuning)
+    if tuning.crossfadeMs <= 0 {
+      fadeFactor = 1
+      fadeInStart = nil
+    }
+    applyVolume()
+    restartTransitionTimer()
+  }
+
+  /**
+   * Com a transição ligada e tocando, trocar de música sai com fade: 0,35 s abaixando, a troca, e a música
+   * nova (ou a mesma, no "voltar ao começo") sobe em até 1 s. Sem transição, troca na hora.
+   */
+  private func fadeOutThen(_ action: @escaping () -> Void) {
+    guard tuning.crossfadeMs > 0, isPlaying else {
+      action()
+      return
+    }
+    // Dois toques seguidos: a primeira troca acontece na hora e o fade segue para a segunda.
+    manualFadeTimer?.invalidate()
+    manualFadeTimer = nil
+    manualAction?()
+    manualAction = action
+    let from = fadeFactor
+    let start = Date()
+    let timer = Timer(timeInterval: 0.03, repeats: true) { [weak self] timer in
+      guard let self else {
+        timer.invalidate()
+        return
+      }
+      let k = Date().timeIntervalSince(start) / 0.35
+      if k < 1 {
+        self.fadeFactor = from * Float(1 - k)
+        self.applyVolume()
+        return
+      }
+      timer.invalidate()
+      self.manualFadeTimer = nil
+      self.fadeFactor = 0
+      self.applyVolume()
+      let pending = self.manualAction
+      self.manualAction = nil
+      let manualMs = min(self.tuning.crossfadeMs, 1000)
+      self.fadeInNext = true
+      self.fadeInNextMs = manualMs
+      let token = self.loadToken
+      pending?()
+      // Não carregou outra música (voltou ao começo, fim da fila): sobe de novo agora mesmo.
+      if self.loadToken == token {
+        self.fadeInNext = false
+        self.fadeInStart = Date()
+        self.fadeInMs = manualMs
+      }
+    }
+    RunLoop.main.add(timer, forMode: .common)
+    manualFadeTimer = timer
+  }
+
+  private func restartTransitionTimer() {
+    transitionTimer?.invalidate()
+    transitionTimer = nil
+    guard tuning.crossfadeMs > 0 else { return }
+    let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in self?.transitionTick() }
+    RunLoop.main.add(timer, forMode: .common)
+    transitionTimer = timer
+  }
+
+  private func transitionTick() {
+    let ms = tuning.crossfadeMs
+    guard ms > 0 else { return }
+    // Fade-out na mão em andamento: ele cuida do volume.
+    if manualFadeTimer != nil { return }
+    if let start = fadeInStart {
+      let t = Date().timeIntervalSince(start) * 1000 / max(1, fadeInMs)
+      if t >= 1 {
+        fadeInStart = nil
+        fadeFactor = 1
+      } else {
+        fadeFactor = Float(max(0, t))
+      }
+    } else if isPlaying, shouldFadeOut(ms) {
+      fadeFactor = Float(max(0, min(1, (durationMs - positionMs) / ms)))
+    } else if fadeFactor < 1, isPlaying {
+      // Voltou para trás na música: volume normal.
+      fadeFactor = 1
+    }
+    applyVolume()
+  }
+
+  private func shouldFadeOut(_ ms: Double) -> Bool {
+    let duration = durationMs
+    // Faixa curta, "repetir uma" e timer "fim da faixa" terminam normalmente.
+    guard duration >= ms * 3, duration - positionMs <= ms, repeatMode != "one", !sleepEndOfTrack else { return false }
+    guard let next = nextIndex(wrap: repeatMode == "all"), items.indices.contains(next) else { return false }
+    if tuning.gaplessAlbums, let album = currentEntry?.album, !album.isEmpty, items[next].album == album { return false }
+    return true
   }
 
   // MARK: - Fila salva (retomar ao abrir o app)

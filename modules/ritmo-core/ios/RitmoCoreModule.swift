@@ -1,5 +1,6 @@
 import AVFoundation
 import ExpoModulesCore
+import Foundation
 import MediaPlayer
 
 /// Item da fila vindo do JS.
@@ -17,7 +18,7 @@ struct TrackItemRecord: Record {
 }
 
 /**
- * Módulo nativo do Ritmo no iOS. Mesmas funções e eventos do módulo Kotlin do Android, para o JS ser um só;
+ * Módulo nativo do Player Downloader no iOS. Mesmas funções e eventos do módulo Kotlin do Android, para o JS ser um só;
  * o que não existe no iPhone (lixeira do sistema, toque de chamada) responde "não suportado".
  */
 public class RitmoCoreModule: Module {
@@ -42,6 +43,7 @@ public class RitmoCoreModule: Module {
         self.startWatchingLibrary()
         // Downloads que terminaram com o app fechado chegam assim que a sessão volta.
         DownloadsIOS.shared.connect()
+        GrabEngineIOS.shared.connect()
       }
     }
 
@@ -61,7 +63,10 @@ public class RitmoCoreModule: Module {
     }
 
     OnAppEntersForeground {
-      DispatchQueue.main.async { RitmoPlayer.shared.inForeground = true }
+      DispatchQueue.main.async {
+        RitmoPlayer.shared.inForeground = true
+        GrabEngineIOS.shared.appDidBecomeActive()
+      }
     }
 
     // MARK: Biblioteca
@@ -80,6 +85,10 @@ public class RitmoCoreModule: Module {
 
     AsyncFunction("getVideoThumbnail") { (videoId: String, size: Int) async -> String? in
       await LibraryStore.videoThumbnail(id: videoId, size: size)
+    }
+
+    AsyncFunction("artworkColor") { (uri: String) -> [String: Any]? in
+      ArtworkColors.dominant(uri)
     }
 
     AsyncFunction("clearArtworkCache") {
@@ -124,6 +133,9 @@ public class RitmoCoreModule: Module {
     }
 
     /// Das URLs passadas, as que ainda existem (para desfazer só o que não foi apagado).
+    // Gravar tags no arquivo é só no Android por enquanto.
+    AsyncFunction("writeTags") { (_: String, _: String?, _: String?, _: String?, _: String?) -> String in "unsupported" }
+
     AsyncFunction("existingUris") { (uris: [String]) -> [String] in
       uris.filter { uri in
         guard let url = URL(string: uri), url.isFileURL else { return true }
@@ -241,6 +253,10 @@ public class RitmoCoreModule: Module {
       RitmoPlayer.shared.sleepState(fired: false)
     }.runOnQueue(DispatchQueue.main)
 
+    AsyncFunction("setPlaybackTuning") { (crossfadeMs: Double, gaplessAlbums: Bool, _: Bool, replayGain: String, preampDb: Double) in
+      RitmoPlayer.shared.setTuning(crossfadeMs: crossfadeMs, gaplessAlbums: gaplessAlbums, replayGain: replayGain, preampDb: preampDb)
+    }.runOnQueue(DispatchQueue.main)
+
     AsyncFunction("restoreSavedQueue") { (play: Bool) -> Bool in
       RitmoPlayer.shared.restoreSavedQueue(play: play)
     }.runOnQueue(DispatchQueue.main)
@@ -251,11 +267,11 @@ public class RitmoCoreModule: Module {
 
     // MARK: Compartilhar, converter, baixar e pasta privada (mesmas funções do Android)
 
-    /// No iPhone o "Abrir com / Copiar para o Ritmo" chega como URL pelo expo-router (+native-intent).
+    /// No iPhone o "Abrir com / Copiar para o Player Downloader" chega como URL pelo expo-router (+native-intent).
     /// Crash nativo da última vez que o app abriu (ou nil). Lê uma vez só.
     Function("takeLastCrash") { () -> String? in CrashCatcher.take() }
 
-    /// Link que a extensão "Compartilhar" guardou quando não conseguiu abrir o Ritmo (lê uma vez só).
+    /// Link que a extensão "Compartilhar" guardou quando não conseguiu abrir o app (lê uma vez só).
     Function("getPendingShare") { () -> [String: Any]? in
       guard let group = Bundle.main.object(forInfoDictionaryKey: "RitmoAppGroup") as? String,
         let defaults = UserDefaults(suiteName: group),
@@ -313,6 +329,57 @@ public class RitmoCoreModule: Module {
     AsyncFunction("setBrowseData") { (json: String) in
       try BrowseCatalog.save(json: json)
       DispatchQueue.main.async { CarPlayController.shared.reload() }
+    }
+
+    // MARK: - Motor local (yt-dlp/Python embutido) — iOS
+
+    /// O motor só fica disponível se o CPython e o pacote grabcore carregaram.
+    Function("grabAvailable") { () -> Bool in GrabCore.shared.available }
+
+    AsyncFunction("grabResolve") { (url: String, playlist: Bool) throws -> [String: Any] in
+      try grabCall(["action": "resolve", "url": url, "playlist": playlist])
+    }
+
+    AsyncFunction("grabSearch") { (query: String, limit: Int) throws -> [String: Any] in
+      try grabCall(["action": "search", "query": query, "limit": limit])
+    }
+
+    /// Enfileira no motor nativo. O Python só resolve as URLs; o URLSession baixa e o
+    /// AVFoundation junta/salva. A promessa resolve assim que o job entra na fila.
+    AsyncFunction("grabStart") { (url: String, formatId: String, options: String) throws -> [String: Any] in
+      try GrabEngineIOS.shared.start(url: url, formatId: formatId, optionsJson: options)
+    }
+
+    AsyncFunction("grabJobs") { (ids: [String]) -> [String: Any] in
+      GrabEngineIOS.shared.jobs(ids: ids)
+    }
+
+    Function("grabCancel") { (id: String) in
+      GrabEngineIOS.shared.cancel(id: id)
+    }
+
+    /// Atualizador das wheels puras do PyPI (só iOS). A versão embutida no .app nunca é alterada.
+    AsyncFunction("grabUpdateStatus") { () throws -> [String: Any] in
+      try GrabUpdater.shared.status()
+    }
+
+    AsyncFunction("grabUpdateCheck") { (force: Bool) throws -> [String: Any] in
+      try GrabUpdater.shared.check(force: force)
+    }
+
+    AsyncFunction("grabUpdateInstall") { () throws -> [String: Any] in
+      try GrabUpdater.shared.install()
+    }
+
+    AsyncFunction("grabUpdateRollback") { () throws -> [String: Any] in
+      try GrabUpdater.shared.rollback()
+    }
+
+    /// Diagnóstico do motor embutido (versões + resolve opcional). Não aparece na interface.
+    AsyncFunction("grabSelfTest") { (options: [String: Any]) -> [String: Any] in
+      var request = options
+      request["action"] = "selftest"
+      return GrabCore.shared.call(request)
     }
   }
 

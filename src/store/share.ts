@@ -25,7 +25,7 @@ export function setPendingShare(payload: SharePayload | null) {
   useShare.setState({ pending: payload });
 }
 
-/** iPhone: "Abrir com / Copiar para o Ritmo" chega como file://… pelo expo-router. */
+/** iPhone: "Abrir com / Copiar para o Player Downloader" chega como file://… pelo expo-router. */
 export function setPendingFromFileUrl(url: string) {
   const raw = url.split(/[?#]/)[0];
   let path = raw;

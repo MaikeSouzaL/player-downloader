@@ -18,7 +18,7 @@ object ShareIntents {
     try {
       parseUnsafe(context, intent)
     } catch (e: Exception) {
-      // Intent malformado de outro app: ignora (não pode derrubar o Ritmo).
+      // Intent malformado de outro app: ignora (não pode derrubar o app).
       null
     }
 
@@ -38,10 +38,10 @@ object ShareIntents {
       Intent.ACTION_VIEW -> {
         val data = intent.data ?: return null
         if (data.scheme == "http" || data.scheme == "https") {
-          // "Abrir com o Ritmo" em um link do YouTube (filtro VIEW do manifesto).
+          // "Abrir com o Player Downloader" em um link do YouTube (filtro VIEW do manifesto).
           text = data.toString()
         } else {
-          // Só content://: file:// de outro app poderia apontar para os arquivos internos do Ritmo.
+          // Só content://: file:// de outro app poderia apontar para os arquivos internos do app.
           if (data.scheme != "content") return null
           uris += data
         }

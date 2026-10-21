@@ -1,7 +1,7 @@
 import { noteDeepLink, setPendingFromFileUrl } from '@/store/share';
 
 /**
- * Links que abrem o app vindos do sistema. Arquivos (iPhone: "Abrir com / Copiar para o Ritmo";
+ * Links que abrem o app vindos do sistema. Arquivos (iPhone: "Abrir com / Copiar para o Player Downloader";
  * Android: "Abrir com" de um gerenciador de arquivos) vão para a tela /share em vez de virar rota.
  */
 export function redirectSystemPath({ path }: { path: string; initial: boolean }): string {

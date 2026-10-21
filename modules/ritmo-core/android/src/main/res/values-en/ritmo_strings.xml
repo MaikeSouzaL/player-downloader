@@ -6,4 +6,7 @@
   <string name="ritmo_widget_previous">Previous</string>
   <string name="ritmo_widget_play">Play or pause</string>
   <string name="ritmo_widget_next">Next</string>
+  <string name="ritmo_bubble_open_controls">Player Downloader bubble: tap for controls</string>
+  <string name="ritmo_bubble_open_app">Open Player Downloader</string>
+  <string name="ritmo_bubble_close">Close the bubble</string>
 </resources>

@@ -18,8 +18,8 @@ function freeTarget(dir: Directory, name: string): File {
 }
 
 /**
- * iPhone: escolhe músicas (e vídeos) no app Arquivos / iCloud Drive e copia para a pasta do Ritmo
- * (Documents, que aparece em Arquivos › No meu iPhone › Ritmo). Depois relê a biblioteca.
+ * iPhone: escolhe músicas (e vídeos) no app Arquivos / iCloud Drive e copia para a pasta do app
+ * (Documents, que aparece em Arquivos › No meu iPhone › Player Downloader). Depois relê a biblioteca.
  */
 export async function importFiles(): Promise<number> {
   const result = await DocumentPicker.getDocumentAsync({

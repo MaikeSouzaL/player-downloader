@@ -40,7 +40,7 @@ type Source = { uri: string; name: string };
 
 /**
  * "Converter em áudio": escolhe a qualidade, mostra o progresso e salva a música na biblioteca
- * (Android: Music/Ritmo; iPhone: Ritmo › Músicas). Formato AAC/M4A, que toca em qualquer aparelho.
+ * (Android: Music/Player Downloader; iPhone: Player Downloader › Músicas). Formato AAC/M4A, que toca em qualquer aparelho.
  */
 export function ConvertSheet({ source, onClose }: { source: Source | null; onClose: () => void }) {
   const tr = useT();

@@ -48,7 +48,7 @@ async function refresh() {
   const track = snapshot?.mediaId && !snapshot.mediaId.startsWith('v:')
     ? useLibrary.getState().index.byId.get(snapshot.mediaId) ?? useExternalTracks.getState().tracks[snapshot.mediaId]
     : undefined;
-  const accent = (ACCENTS[useSettings.getState().accent] ?? ACCENTS.blue).light[0];
+  const accent = (ACCENTS[useSettings.getState().accent] ?? ACCENTS.orange).light[0];
   const props: NowPlayingProps = track
     ? {
         title: track.title,
@@ -88,7 +88,7 @@ export function startWidgetSync(): () => void {
       artist: '',
       isPlaying: false,
       cover: null,
-      accent: ACCENTS.blue.light[0],
+      accent: ACCENTS.orange.light[0],
     });
   } catch (e) {
     logError('Widget: criar', e);

@@ -29,6 +29,7 @@ import expo.modules.kotlin.records.Field
 import expo.modules.kotlin.records.Record
 import java.io.File
 import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 
 class TrackItem : Record {
   @Field val id: String = ""
@@ -54,8 +55,13 @@ class RitmoCoreModule : Module() {
 
   private var libraryObserver: LibraryObserver? = null
 
-  /** Pedidos de confirmação do Android (lixeira/exclusão) esperando resposta, por requestCode. */
-  private class MediaRequest(val promise: Promise, val retryDelete: List<Uri>?)
+  /**
+   * Pedidos de confirmação do Android (lixeira, exclusão, gravar tags) esperando resposta, por requestCode.
+   * `onResult` decide o que fazer com a resposta (gravar tags continua o trabalho depois do "Permitir").
+   */
+  private class MediaRequest(val promise: Promise, val retryDelete: List<Uri>?, val onResult: ((Boolean) -> Unit)? = null)
+  /** Gravar tags copia o arquivo inteiro: uma gravação por vez, fora da thread principal. */
+  private val tagExecutor = Executors.newSingleThreadExecutor()
   private val mediaRequests = HashMap<Int, MediaRequest>()
   private var nextRequestCode = 7300
 
@@ -105,7 +111,11 @@ class RitmoCoreModule : Module() {
 
     OnCreate {
       // O mais cedo possível: qualquer crash nativo daqui em diante vai para o relatório.
-      appContext.reactContext?.let { CrashCatcher.install(it) }
+      appContext.reactContext?.let { ctx ->
+        CrashCatcher.install(ctx)
+        // Extrai yt-dlp/Python/FFmpeg em background: a primeira busca/download não paga isso na UI.
+        GrabEngine.warmUp(ctx.applicationContext)
+      }
       main.post {
         connect()
         // O timer e os avisos de erro vivem no processo; o módulo só repassa para o JS.
@@ -135,7 +145,7 @@ class RitmoCoreModule : Module() {
       }
     }
 
-    // ------------------------------------------------------------ Compartilhar com o Ritmo
+    // ------------------------------------------------------------ Compartilhar com o Player Downloader
 
     /** Arquivos/links que abriram o app pelo "Compartilhar" ou "Abrir com" (uma vez só). */
     /** Crash nativo da última vez que o app abriu (ou null). Lê uma vez só. */
@@ -145,11 +155,36 @@ class RitmoCoreModule : Module() {
       ShareIntents.parse(context, appContext.currentActivity?.intent)
     }
 
+    // ------------------------------------------------------------ Download no aparelho (yt-dlp)
+    // Sem servidor/cookies: o yt-dlp embutido usa a conexão do celular.
+
+    Function("grabAvailable") { GrabEngine.available() }
+
+    AsyncFunction("grabResolve") { url: String, playlist: Boolean, promise: Promise ->
+      GrabEngine.resolveAsync(context, url, playlist, promise)
+    }
+
+    AsyncFunction("grabSearch") { query: String, limit: Int, promise: Promise ->
+      GrabEngine.searchAsync(context, query, limit, promise)
+    }
+
+    AsyncFunction("grabStart") { url: String, formatId: String, options: String, promise: Promise ->
+      try {
+        promise.resolve(GrabEngine.start(context, url, formatId, options))
+      } catch (e: Exception) {
+        promise.reject("E_GRAB", e.message ?: "Falha ao iniciar o download", e)
+      }
+    }
+
+    AsyncFunction("grabJobs") { ids: List<String> -> GrabEngine.jobs(context, ids) }
+
+    Function("grabCancel") { id: String -> GrabEngine.cancel(id) }
+
     OnNewIntent { intent ->
       ShareIntents.parse(context, intent)?.let { sendEvent("onShare", it) }
     }
 
-    /** Copia para Music/Ritmo (áudio) ou Movies/Ritmo (vídeo). Devolve a URI salva. */
+    /** Copia para Music/Player Downloader (áudio) ou Movies/Player Downloader (vídeo). Devolve a URI salva. */
     AsyncFunction("saveToLibrary") { uri: String, name: String, mime: String?, kind: String ->
       MediaSaver.save(context, Uri.parse(uri), name, mime, kind).toString()
     }
@@ -214,6 +249,7 @@ class RitmoCoreModule : Module() {
     }
 
     OnActivityEntersForeground {
+      appContext.reactContext?.let { FloatingBubble.onAppForeground(it) }
       main.post {
         inForeground = true
         main.removeCallbacks(progressTick)
@@ -222,12 +258,25 @@ class RitmoCoreModule : Module() {
     }
 
     OnActivityEntersBackground {
+      appContext.reactContext?.let { FloatingBubble.onAppBackground(it) }
       main.post { inForeground = false }
     }
+
+    // ------------------------------------------------------- balão flutuante
+
+    Function("setFloatingBubble") { enabled: Boolean -> FloatingBubble.setEnabled(context, enabled) }
+
+    Function("canDrawOverlays") { FloatingBubble.canDraw(context) }
+
+    Function("openOverlayPermission") { FloatingBubble.openPermission(context) }
 
     OnActivityResult { _, payload ->
       val request = mediaRequests.remove(payload.requestCode) ?: return@OnActivityResult
       val ok = payload.resultCode == Activity.RESULT_OK
+      request.onResult?.let {
+        it(ok)
+        return@OnActivityResult
+      }
       // Android 10: depois de autorizar, a exclusão precisa ser feita de novo pelo app.
       if (ok && request.retryDelete != null) deleteDirectly(request.retryDelete, request.promise)
       else request.promise.resolve(ok)
@@ -248,6 +297,9 @@ class RitmoCoreModule : Module() {
     }
 
     AsyncFunction("clearArtworkCache") { MediaLibrary.clearCache(context) }
+
+    /** Cor predominante da capa (para o player usar as cores da música). */
+    AsyncFunction("artworkColor") { uri: String -> ArtworkColors.dominant(context, uri) }
 
     AsyncFunction("queryTrashed") { MediaLibrary.trashed(context) }
 
@@ -289,6 +341,20 @@ class RitmoCoreModule : Module() {
     }.runOnQueue(Queues.MAIN)
 
     /** URIs (content://) que ainda existem no MediaStore. */
+    /** Grava título/artista/álbum/capa no próprio arquivo (MP3 e FLAC). "written", "denied" ou "unsupported". */
+    AsyncFunction("writeTags") { uri: String, title: String?, artist: String?, album: String?, cover: String?, promise: Promise ->
+      val target = Uri.parse(uri)
+      if (target.scheme != "content") return@AsyncFunction promise.resolve("unsupported")
+      val tags = TagWriter.Tags(title, artist, album)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        launchRequest(MediaStore.createWriteRequest(context.contentResolver, listOf(target)).intentSender, promise, null) { granted ->
+          if (granted) writeTagsInBackground(target, tags, cover, promise, retried = true) else promise.resolve("denied")
+        }
+      } else {
+        writeTagsInBackground(target, tags, cover, promise, retried = false)
+      }
+    }.runOnQueue(Queues.MAIN)
+
     AsyncFunction("existingUris") { list: List<String> ->
       list.filter { raw ->
         // Só o MediaStore dá para conferir; o resto conta como existente (desfazer duplica, não perde).
@@ -364,19 +430,22 @@ class RitmoCoreModule : Module() {
       withController(promise) { it.seekTo(positionMs.toLong()) }
     }.runOnQueue(Queues.MAIN)
 
+    // Com a transição suave ligada, as trocas pedidas pelo app saem com fade (PlaybackRuntime.fadeOutThen).
     AsyncFunction("skipTo") { index: Int, promise: Promise ->
       withController(promise) { c ->
         if (index in 0 until c.mediaItemCount) {
-          c.seekToDefaultPosition(index)
-          c.play()
+          PlaybackRuntime.fadeOutThen {
+            if (index < c.mediaItemCount) c.seekToDefaultPosition(index)
+            c.play()
+          }
         }
       }
     }.runOnQueue(Queues.MAIN)
 
-    AsyncFunction("next") { promise: Promise -> withController(promise) { it.seekToNextMediaItem() } }.runOnQueue(Queues.MAIN)
+    AsyncFunction("next") { promise: Promise -> withController(promise) { c -> PlaybackRuntime.fadeOutThen { c.seekToNextMediaItem() } } }.runOnQueue(Queues.MAIN)
 
     /** Volta ao começo se já tocou mais de 3 s; senão vai para a anterior (como o media3 faz). */
-    AsyncFunction("previous") { promise: Promise -> withController(promise) { it.seekToPrevious() } }.runOnQueue(Queues.MAIN)
+    AsyncFunction("previous") { promise: Promise -> withController(promise) { c -> PlaybackRuntime.fadeOutThen { c.seekToPrevious() } } }.runOnQueue(Queues.MAIN)
 
     AsyncFunction("setShuffle") { enabled: Boolean, promise: Promise ->
       withController(promise) { it.shuffleModeEnabled = enabled }
@@ -453,6 +522,14 @@ class RitmoCoreModule : Module() {
     }.runOnQueue(Queues.MAIN)
 
     AsyncFunction("getSleepTimer") { PlaybackRuntime.sleepState(fired = false) }.runOnQueue(Queues.MAIN)
+
+    // ------------------------------------------ transição, pular silêncio e volume igualado
+
+    /** Salva os ajustes (valem com o app fechado) e aplica no player na hora. */
+    AsyncFunction("setPlaybackTuning") { crossfadeMs: Double, gaplessAlbums: Boolean, skipSilence: Boolean, replayGain: String, preampDb: Double ->
+      PlaybackTuning.save(context, PlaybackTuning.Settings(crossfadeMs.toLong(), gaplessAlbums, skipSilence, replayGain, preampDb.toFloat()))
+      PlaybackRuntime.applyTuning()
+    }.runOnQueue(Queues.MAIN)
 
     // ------------------------------------------------------- fila salva
 
@@ -598,19 +675,41 @@ class RitmoCoreModule : Module() {
   private fun audioUris(ids: List<String>): List<Uri> =
     ids.mapNotNull { it.toLongOrNull() }.map { ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, it) }
 
-  private fun launchRequest(sender: IntentSender, promise: Promise, retryDelete: List<Uri>?) {
+  private fun launchRequest(sender: IntentSender, promise: Promise, retryDelete: List<Uri>?, onResult: ((Boolean) -> Unit)? = null) {
     val activity = appContext.currentActivity
     if (activity == null) {
       promise.reject(CodedException("ERR_NO_ACTIVITY", "Abra o app para confirmar", null))
       return
     }
     val code = nextRequestCode++
-    mediaRequests[code] = MediaRequest(promise, retryDelete)
+    mediaRequests[code] = MediaRequest(promise, retryDelete, onResult)
     try {
       activity.startIntentSenderForResult(sender, code, null, 0, 0, 0)
     } catch (e: IntentSender.SendIntentException) {
       mediaRequests.remove(code)
       promise.reject(CodedException("ERR_REQUEST", "Não foi possível pedir a confirmação", e))
+    }
+  }
+
+  private fun writeTagsInBackground(uri: Uri, tags: TagWriter.Tags, cover: String?, promise: Promise, retried: Boolean) {
+    tagExecutor.execute {
+      try {
+        promise.resolve(TagFile.write(context, uri, tags, cover))
+      } catch (e: SecurityException) {
+        // Android 10: o sistema mostra o pedido de autorização e o app tenta de novo.
+        if (!retried && Build.VERSION.SDK_INT == Build.VERSION_CODES.Q && e is RecoverableSecurityException) {
+          main.post {
+            launchRequest(e.userAction.actionIntent.intentSender, promise, null) { granted ->
+              if (granted) writeTagsInBackground(uri, tags, cover, promise, retried = true) else promise.resolve("denied")
+            }
+          }
+        } else {
+          promise.resolve("denied")
+        }
+      } catch (e: Throwable) {
+        // Throwable: até falta de memória (arquivo gigante) responde ao app em vez de derrubar a thread.
+        promise.reject(CodedException("ERR_TAGS", e.message ?: "Falha ao gravar as tags", e))
+      }
     }
   }
 

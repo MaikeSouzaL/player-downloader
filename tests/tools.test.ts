@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { describe, it } from 'node:test';
 
+import { canRetrySave, needsCleanup } from '../src/lib/download-jobs.ts';
 import { audioNameFor, blockedService, classifyLink, extensionOf, extractUrl, fileNameFor, isPageType, mediaTypeOf, playableOnIos } from '../src/lib/links.ts';
 import { checkPin, hashPin, isValidPin, lockoutMs, makeSalt, sha256 } from '../src/lib/pin.ts';
 
@@ -109,5 +110,23 @@ describe('PIN', () => {
     assert.equal(lockoutMs(5), 30_000);
     assert.equal(lockoutMs(10), 60_000);
     assert.equal(lockoutMs(100), 15 * 60_000);
+  });
+});
+
+describe('downloads diretos: salvar de novo e limpeza', () => {
+  it('só oferece "Tentar salvar" quando o arquivo baixado ficou guardado', () => {
+    assert.equal(canRetrySave({ status: 'failed', pendingUri: 'file:///x/ritmo/a/musica.mp3' }), true);
+    // Falha do próprio download (rede, link): não há arquivo para salvar.
+    assert.equal(canRetrySave({ status: 'failed' }), false);
+    assert.equal(canRetrySave({ status: 'failed', pendingUri: '' }), false);
+    // Já salvando/convertendo de novo: o segundo toque não pode salvar outra cópia.
+    assert.equal(canRetrySave({ status: 'saving', pendingUri: 'file:///x' }), false);
+    assert.equal(canRetrySave({ status: 'done', pendingUri: 'file:///x' }), false);
+  });
+
+  it('limpa o que falhou ou foi cancelado; concluído e em andamento não', () => {
+    assert.equal(needsCleanup({ status: 'failed' }), true);
+    assert.equal(needsCleanup({ status: 'cancelled' }), true);
+    for (const status of ['done', 'running', 'saving', 'converting']) assert.equal(needsCleanup({ status }), false, status);
   });
 });

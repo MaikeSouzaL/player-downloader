@@ -43,6 +43,7 @@ example
 /android
 
 # build do módulo nativo (Gradle) e pacotes gerados
+modules
 modules/*/android/build/
 modules/*/android/.gradle/
 modules/*/android/.cxx/

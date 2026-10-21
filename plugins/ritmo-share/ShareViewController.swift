@@ -1,9 +1,9 @@
 import UIKit
 import UniformTypeIdentifiers
 
-/// "Compartilhar › Ritmo" no iPhone (YouTube, Instagram, Safari, qualquer app): pega o link e abre o
-/// Ritmo direto na tela de escolher vídeo/áudio e qualidade (`ritmo://grab?url=…`).
-/// Se o iOS não deixar abrir o app, guarda o link no App Group (o Ritmo pega ao abrir) e copia
+/// "Compartilhar › Player Downloader" no iPhone (YouTube, Instagram, Safari, qualquer app): pega o link e abre o
+/// Player Downloader direto na tela de escolher vídeo/áudio e qualidade (`ritmo://grab?url=…`).
+/// Se o iOS não deixar abrir o app, guarda o link no App Group (o app pega ao abrir) e copia
 /// para a área de transferência, com um aviso.
 ///
 /// Gerado pelo plugin `plugins/withRitmoShareExtension.js` — edite o modelo em `plugins/ritmo-share/`.
@@ -57,7 +57,7 @@ final class ShareViewController: UIViewController {
     }
   }
 
-  /// Não deu para abrir o Ritmo: guarda para a próxima abertura e copia o link.
+  /// Não deu para abrir o app: guarda para a próxima abertura e copia o link.
   private func fallback(_ link: URL) {
     UserDefaults(suiteName: group)?.set(link.absoluteString, forKey: pendingKey)
     UIPasteboard.general.string = link.absoluteString
@@ -107,7 +107,7 @@ final class ShareViewController: UIViewController {
       .first { $0.scheme == "http" || $0.scheme == "https" }
   }
 
-  // MARK: - Abrir o Ritmo
+  // MARK: - Abrir o app
 
   /// Extensões não podem chamar `UIApplication.shared.open`; o caminho é achar o UIApplication na
   /// cadeia de responders e chamar `openURL:options:completionHandler:` pelo runtime.

@@ -151,7 +151,7 @@ describe('backup', () => {
   it('valida o arquivo', () => {
     assert.deepEqual(parseBackup(JSON.stringify(backup)), backup);
     assert.throws(() => parseBackup('{nope'), /JSON corrompido/);
-    assert.throws(() => parseBackup('{"format":"outro"}'), /não é um backup do Ritmo/);
+    assert.throws(() => parseBackup('{"format":"outro"}'), /não é um backup do Player Downloader/);
     assert.throws(() => parseBackup(JSON.stringify({ ...backup, version: 99 })), /versão mais nova/);
     const dirty = parseBackup(JSON.stringify({ ...backup, liked: ['2', 7, null], plays: { '1': -4, '2': 'x', '3': 2 } }));
     assert.deepEqual(dirty.liked, ['2']);

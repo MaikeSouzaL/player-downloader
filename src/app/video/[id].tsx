@@ -10,7 +10,9 @@ import { IconButton } from '@/components/ui/Button';
 import { Text } from '@/components/ui/Text';
 import { useT } from '@/i18n';
 import { logError } from '@/lib/errorlog';
+import { applyOrientation } from '@/lib/orientation';
 import { formatDuration } from '@/lib/format';
+import RitmoCore from '@/modules/ritmo-core';
 import { useLibrary } from '@/store/library';
 import { usePlayer } from '@/store/player';
 import { useUi } from '@/store/ui';
@@ -99,11 +101,12 @@ export default function VideoScreen() {
 
   // A música para enquanto o vídeo toca; ao sair, guarda a posição e volta a tela para retrato.
   useEffect(() => {
-    if (usePlayer.getState().snapshot?.isPlaying) usePlayer.getState().toggle();
+    if (usePlayer.getState().snapshot?.isPlaying) RitmoCore.pause().catch((e) => logError('Vídeo: pausar a música', e));
     const progress = last.current;
     return () => {
       if (!id.startsWith('v:') && progress.duration > 0 && progress.position > 0) useVideoProgress.getState().save(id, progress.position, progress.duration);
-      lock(false);
+      // Sai do vídeo: volta para o que o ajuste "Girar a tela" pede (em pé ou livre).
+      applyOrientation();
     };
   }, [id]);
 

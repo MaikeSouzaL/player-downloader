@@ -3,6 +3,7 @@ import { UNKNOWN_ARTIST, VARIOUS_ARTISTS } from '@/lib/library';
 import { useSettings } from '@/store/settings';
 
 import { common } from './parts/common';
+import { extras } from './parts/extras';
 import { ios } from './parts/ios';
 import { library } from './parts/library';
 import { player } from './parts/player';
@@ -12,13 +13,13 @@ import { tools } from './parts/tools';
 export type Lang = 'pt' | 'en' | 'es';
 export type LangPreference = 'system' | Lang;
 
-type All = typeof common.pt & typeof library.pt & typeof player.pt & typeof settings.pt & typeof ios.pt & typeof tools.pt;
+type All = typeof common.pt & typeof library.pt & typeof player.pt & typeof settings.pt & typeof ios.pt & typeof tools.pt & typeof extras.pt;
 export type StringKey = keyof All & string;
 /** Chave base de um plural: existe `<base>.one` e `<base>.many`. */
 export type PluralKey = StringKey extends infer K ? (K extends `${infer B}.one` ? B : never) : never;
 type Vars = Record<string, string | number>;
 
-const PARTS = [common, library, player, settings, ios, tools];
+const PARTS = [common, library, player, settings, ios, tools, extras];
 const DICTS: Record<Lang, Record<string, string>> = {
   pt: Object.assign({}, ...PARTS.map((p) => p.pt)),
   en: Object.assign({}, ...PARTS.map((p) => p.en)),

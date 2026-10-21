@@ -24,7 +24,7 @@ type ItemState = 'idle' | 'busy' | 'saved' | 'vault' | 'error';
 
 const WAIT_MS = 5000;
 
-/** "Compartilhar com o Ritmo" (inspirado no SnapTube): o que fazer com o que veio de outro app. */
+/** "Compartilhar com o Player Downloader" (inspirado no SnapTube): o que fazer com o que veio de outro app. */
 export default function ShareScreen() {
   const tr = useT();
   const payload = useShare((s) => s.pending);
@@ -37,7 +37,7 @@ export default function ShareScreen() {
     return () => clearTimeout(timer);
   }, [payload]);
 
-  // Veio do YouTube/Instagram/etc. e o servidor está configurado: vai direto para a escolha de qualidade.
+  // Veio do YouTube/Instagram/etc. e o motor local existe (Android): vai direto para a qualidade.
   useEffect(() => {
     if (!url || !grabEnabled() || !blockedService(url)) return;
     setPendingShare(null);
@@ -184,7 +184,9 @@ function LinkCard({ url, onStarted }: { url: string; onStarted: () => void }) {
                 </Text>
               </View>
             </View>
-            <Button label={tr('tools.grab.server')} icon="settings" variant="outline" onPress={() => router.push('/settings/grab')} />
+            <Text variant="caption" muted>
+              {tr('tools.grab.androidOnlyText')}
+            </Text>
           </>
         ))}
       {(info?.kind === 'page' || info?.kind === 'invalid') && (

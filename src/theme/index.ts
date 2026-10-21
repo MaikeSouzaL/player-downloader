@@ -3,7 +3,7 @@ import { useColorScheme } from 'react-native';
 import type { StringKey } from '@/i18n';
 import { useSettings } from '@/store/settings';
 
-/** Paleta tirada dos recursos do Lark Player (day_* / night_*). */
+/** Paleta tirada dos recursos do Lark Player (day_* / night_*), com o laranja do logo Vinil como destaque. */
 const light = {
   background: '#F2F4F5',
   surface: '#FFFFFF',
@@ -12,9 +12,9 @@ const light = {
   textMuted: 'rgba(10,10,10,0.5)',
   textWeak: 'rgba(10,10,10,0.3)',
   border: 'rgba(10,10,10,0.06)',
-  primary: '#2596FF',
-  primaryContent: '#0782F3',
-  primarySoft: '#E2EEFA',
+  primary: '#FD7846',
+  primaryContent: '#E2552A',
+  primarySoft: '#FAE8E2',
   onPrimary: '#FFFFFF',
   danger: '#F44F5E',
   scrim: 'rgba(0,0,0,0.5)',
@@ -30,9 +30,9 @@ const dark: typeof light = {
   textMuted: 'rgba(243,246,248,0.6)',
   textWeak: 'rgba(243,246,248,0.36)',
   border: 'rgba(243,246,248,0.06)',
-  primary: '#2596FF',
-  primaryContent: '#54B7FF',
-  primarySoft: '#12202E',
+  primary: '#FD7846',
+  primaryContent: '#FF9A73',
+  primarySoft: '#231814',
   onPrimary: '#FFFFFF',
   danger: '#F44F5E',
   scrim: 'rgba(0,0,0,0.6)',
@@ -42,19 +42,33 @@ const dark: typeof light = {
 
 export type Colors = typeof light;
 
+/** Modo escuro com fundo preto de verdade (OLED): os pixels pretos ficam apagados. */
+const black: Colors = {
+  ...dark,
+  background: '#000000',
+  surface: '#0E0E0E',
+  surfaceAlt: '#1A1A1A',
+  border: 'rgba(243,246,248,0.08)',
+  primarySoft: '#170E0A',
+  playerBackground: '#000000',
+};
+
 export type Accent = 'blue' | 'green' | 'orange' | 'pink' | 'purple';
 
-/** Temas de cor do Lark: nome (chave de tradução), destaque, conteúdo em destaque e fundo suave (claro/escuro). */
+/**
+ * Temas de cor: nome (chave de tradução), destaque, conteúdo em destaque e fundo suave (claro/escuro).
+ * O laranja é o do logo Vinil e vem primeiro (é o padrão); os outros são os do Lark.
+ */
 export const ACCENTS: Record<Accent, { nameKey: StringKey; light: [string, string, string]; dark: [string, string, string] }> = {
+  orange: { nameKey: 'settings.accent.orange', light: ['#FD7846', '#E2552A', '#FAE8E2'], dark: ['#FD7846', '#FF9A73', '#231814'] },
   blue: { nameKey: 'settings.accent.blue', light: ['#2596FF', '#0782F3', '#E2EEFA'], dark: ['#2596FF', '#54B7FF', '#12202E'] },
   green: { nameKey: 'settings.accent.green', light: ['#14EA86', '#0BA862', '#E2F8EE'], dark: ['#12C371', '#3FE29A', '#16271F'] },
-  orange: { nameKey: 'settings.accent.orange', light: ['#FB7746', '#E25A27', '#FAE8E2'], dark: ['#FD7846', '#FF9A73', '#231814'] },
   pink: { nameKey: 'settings.accent.pink', light: ['#F6606D', '#E2384A', '#FAE2E4'], dark: ['#F44F5E', '#FF7D89', '#2A181A'] },
   purple: { nameKey: 'settings.accent.purple', light: ['#ED41D3', '#C824AF', '#FAE2F6'], dark: ['#DA52C5', '#EC7FDB', '#2A1827'] },
 };
 
 export const COVER_GRADIENTS: [string, string][] = [
-  ['#2596FF', '#54B7FF'],
+  ['#FD7846', '#D84B22'],
   ['#7F7FD5', '#86A8E7'],
   ['#F2994A', '#F2C94C'],
   ['#11998E', '#38EF7D'],
@@ -84,8 +98,9 @@ export function useIsDark(): boolean {
 export function useColors(): Colors {
   const isDark = useIsDark();
   const accent = useSettings((s) => s.accent);
-  const base = isDark ? dark : light;
-  if (accent === 'blue') return base;
-  const [primary, primaryContent, primarySoft] = (ACCENTS[accent] ?? ACCENTS.blue)[isDark ? 'dark' : 'light'];
+  const pureBlack = useSettings((s) => s.pureBlack);
+  const base = isDark ? (pureBlack ? black : dark) : light;
+  if (accent === 'orange' || !Object.hasOwn(ACCENTS, accent)) return base;
+  const [primary, primaryContent, primarySoft] = ACCENTS[accent][isDark ? 'dark' : 'light'];
   return { ...base, primary, primaryContent, primarySoft };
 }

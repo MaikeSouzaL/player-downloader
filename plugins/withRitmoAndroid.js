@@ -1,7 +1,7 @@
-const { AndroidConfig, withAndroidManifest } = require('expo/config-plugins');
+const { AndroidConfig, withAndroidManifest, withGradleProperties } = require('expo/config-plugins');
 
 /**
- * "Compartilhar com o Ritmo" e "Abrir com o Ritmo" no Android: a tela principal passa a receber
+ * "Compartilhar com o Player Downloader" e "Abrir com o Player Downloader" no Android: a tela principal passa a receber
  *  - SEND de texto (links), áudio e vídeo;
  *  - SEND_MULTIPLE de áudio e vídeo;
  *  - VIEW de arquivos de áudio e vídeo (gerenciador de arquivos, WhatsApp, Telegram…);
@@ -67,5 +67,17 @@ module.exports = function withRitmoAndroid(config) {
     }
     return cfg;
   });
+
+  // youtubedl-android carrega Python/FFmpeg/QuickJS das libs nativas empacotadas. O AGP novo
+  // recusa `android:extractNativeLibs="true"` no manifesto; o Expo já tem o
+  // `jniLibs.useLegacyPackaging` no template, ligado por esta propriedade.
+  config = withGradleProperties(config, (cfg) => {
+    const key = 'expo.useLegacyPackaging';
+    const entry = cfg.modResults.find((item) => item.type === 'property' && item.key === key);
+    if (entry) entry.value = 'true';
+    else cfg.modResults.push({ type: 'property', key, value: 'true' });
+    return cfg;
+  });
+
   return config;
 };

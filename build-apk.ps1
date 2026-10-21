@@ -1,12 +1,14 @@
 <#
-  Gera o APK release do Ritmo neste Windows e copia para ..\Ritmo.apk.
+  Gera o APK release do Player Downloader neste Windows e copia para ..\PlayerDownloader.apk.
 
   Por que tantos passos: o C++ gerado pelo React Native passa do limite de caminho do
   Windows, então o build roda numa cópia em C:\rt com um ninja >= 1.12 (C:\rt-tools\cmake).
 
   Uso (PowerShell, na pasta ritmo):
-    .\build-apk.ps1                 # prebuild + sincroniza + compila
+    .\build-apk.ps1                 # prebuild + R8 + compila + assina → ..\PlayerDownloader.apk
     .\build-apk.ps1 -SkipPrebuild   # só sincroniza e compila (quando app.json/plugins não mudaram)
+    .\build-apk.ps1 -NoMinify       # fallback seguro, sem R8 (APK maior; use se o release otimizado quebrar)
+    .\build-apk.ps1 -Arm64Only      # só arm64-v8a; também copia para ..\PlayerDownloader-arm64.apk
 #>
 param(
   [switch]$SkipPrebuild,
@@ -14,13 +16,19 @@ param(
   [string]$CmakeDir = 'C:\rt-tools\cmake',
   [string]$Abis = 'arm64-v8a,armeabi-v7a',
   # Só para testes: gera com a chave de debug, que NÃO instala por cima da 1.2+ (chave própria).
-  [switch]$AllowDebugSigning
+  [switch]$AllowDebugSigning,
+  # Fallback: APK maior, sem R8 nem encolhimento de recursos (para quando o release otimizado quebrar).
+  [switch]$NoMinify,
+  # APK só arm64-v8a (a maioria dos aparelhos atuais); gera também ..\PlayerDownloader-arm64.apk.
+  [switch]$Arm64Only
 )
 
 $ErrorActionPreference = 'Stop'
 $Project = $PSScriptRoot
-$Out = Join-Path (Split-Path $Project -Parent) 'Ritmo.apk'
+$Out = Join-Path (Split-Path $Project -Parent) 'PlayerDownloader.apk'
 $started = Get-Date
+
+if ($Arm64Only) { $Abis = 'arm64-v8a' }
 
 function Step($text) { Write-Host "`n==> $text" -ForegroundColor Cyan }
 
@@ -38,7 +46,7 @@ $ninjaVersion = [version](& $ninja --version)
 if ($ninjaVersion -lt [version]'1.12') { throw "ninja $ninjaVersion é antigo demais; precisa do 1.12 ou mais novo." }
 
 if (-not $AllowDebugSigning -and -not (Test-Path (Join-Path $env:USERPROFILE '.android\ritmo\signing.properties'))) {
-  throw 'Falta a chave do Ritmo em %USERPROFILE%\.android\ritmo (signing.properties). Restaure do backup ou use -AllowDebugSigning para um build de teste.'
+  throw 'Falta a chave do Player Downloader em %USERPROFILE%\.android\ritmo (signing.properties). Restaure do backup ou use -AllowDebugSigning para um build de teste.'
 }
 
 if (-not $SkipPrebuild) {
@@ -63,12 +71,7 @@ foreach ($dir in 'src', 'assets', 'plugins', 'tests') {
 }
 Sync (Join-Path $Project 'modules') (Join-Path $BuildDir 'modules') @('/MIR', '/XD', 'build', '.cxx', '.gradle')
 Sync (Join-Path $Project 'android') (Join-Path $BuildDir 'android') @('/MIR', '/XD', 'build', '.cxx', '.gradle', '/XF', 'local.properties')
-# .env.local = servidor que o app já traz (EXPO_PUBLIC_GRAB_*): se saiu daqui, a cópia antiga não pode sobrar lá.
-foreach ($envFile in '.env', '.env.local') {
-  $copy = Join-Path $BuildDir $envFile
-  if (-not (Test-Path (Join-Path $Project $envFile)) -and (Test-Path $copy)) { Remove-Item $copy }
-}
-Sync $Project $BuildDir @('app.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'babel.config.js', 'metro.config.js', 'index.ts', 'expo-env.d.ts', '.env', '.env.local')
+Sync $Project $BuildDir @('app.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'babel.config.js', 'metro.config.js', 'index.ts', 'expo-env.d.ts')
 # node_modules: só copia o que mudou, sem apagar (lá ficam os builds das bibliotecas nativas).
 Sync (Join-Path $Project 'node_modules') (Join-Path $BuildDir 'node_modules') @('/E')
 
@@ -81,7 +84,14 @@ Set-Content -Path $props -Value $lines -Encoding ascii
 Step 'gradlew :app:assembleRelease'
 Push-Location (Join-Path $BuildDir 'android')
 try {
-  .\gradlew.bat :app:assembleRelease "-PreactNativeArchitectures=$Abis"
+  $gradleArgs = @(':app:assembleRelease', "-PreactNativeArchitectures=$Abis")
+  if ($NoMinify) {
+    # Sobrepõe o gradle.properties gerado por plugins/withRitmoProguard.js (CLI -P vence).
+    # Os dois juntos: shrinkResources sem minify o AGP recusa.
+    $gradleArgs += '-Pandroid.enableMinifyInReleaseBuilds=false'
+    $gradleArgs += '-Pandroid.enableShrinkResourcesInReleaseBuilds=false'
+  }
+  & .\gradlew.bat @gradleArgs
   if ($LASTEXITCODE) { throw 'O build do Gradle falhou (veja a saída acima).' }
 } finally { Pop-Location }
 
@@ -94,7 +104,7 @@ if (-not (Test-Path $apk)) { throw "APK não encontrado em $apk." }
 $signing = Join-Path $env:USERPROFILE '.android\ritmo'
 $signingProps = Join-Path $signing 'signing.properties'
 if (Test-Path $signingProps) {
-  Step 'Assinando com a chave do Ritmo'
+  Step 'Assinando com a chave do Player Downloader'
   $p = @{}
   Get-Content $signingProps | ForEach-Object { $k, $v = $_ -split '=', 2; $p[$k] = $v }
   $buildTools = Get-ChildItem (Join-Path $(if ($sdk) { $sdk } else { "$env:LOCALAPPDATA\Android\Sdk" }) 'build-tools') | Sort-Object { [version]($_.Name -replace '[^0-9.]', '') } | Select-Object -Last 1
@@ -115,9 +125,18 @@ if (Test-Path $signingProps) {
   Write-Host "Sem ${signingProps}: o APK fica com a chave de debug (não instala por cima da 1.2+)." -ForegroundColor Yellow
   Copy-Item $apk $Out -Force
 } else {
-  throw "Não achei ${signingProps}. Sem a chave do Ritmo o APK não instala por cima da versão atual. Restaure a pasta $signing do backup (ou use -AllowDebugSigning para um build de teste)."
+  throw "Não achei ${signingProps}. Sem a chave do Player Downloader o APK não instala por cima da versão atual. Restaure a pasta $signing do backup (ou use -AllowDebugSigning para um build de teste)."
 }
 
 $size = [math]::Round((Get-Item $Out).Length / 1MB, 1)
 $minutes = [math]::Round(((Get-Date) - $started).TotalMinutes, 1)
 Write-Host "`nPronto: $Out ($size MB) em $minutes min." -ForegroundColor Green
+
+if ($Arm64Only) {
+  $armOut = Join-Path (Split-Path $Project -Parent) 'PlayerDownloader-arm64.apk'
+  Copy-Item $Out $armOut -Force
+  $armSize = [math]::Round((Get-Item $armOut).Length / 1MB, 1)
+  Write-Host "Copia arm64-v8a: $armOut ($armSize MB)." -ForegroundColor Green
+}
+
+Write-Host "Confira o APK com: .\scripts\verify-apk.ps1" -ForegroundColor DarkGray

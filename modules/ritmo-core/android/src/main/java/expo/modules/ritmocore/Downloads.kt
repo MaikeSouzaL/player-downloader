@@ -24,7 +24,7 @@ object Downloads {
       .setAllowedOverMetered(true)
       .setAllowedOverRoaming(true)
       .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, "ritmo/${UUID.randomUUID()}/$name")
-      .addRequestHeader("User-Agent", "Ritmo/1.4 (Android)")
+      .addRequestHeader("User-Agent", "PlayerDownloader/1.5 (Android)")
     mime?.takeIf { it.contains('/') }?.let { request.setMimeType(it) }
     return manager(context).enqueue(request)
   }

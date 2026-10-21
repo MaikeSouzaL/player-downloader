@@ -28,6 +28,7 @@ export const SF_SYMBOLS: Record<string, SFSymbol> = {
   check_box_outline_blank: 'square',
   check_circle: 'checkmark.circle.fill',
   checklist: 'checklist',
+  chevron_left: 'chevron.left',
   chevron_right: 'chevron.right',
   close: 'xmark',
   closed_caption: 'captions.bubble.fill',
@@ -117,4 +118,7 @@ export const SF_SYMBOLS: Record<string, SFSymbol> = {
   visibility: 'eye',
   visibility_off: 'eye.slash',
   warning: 'exclamationmark.triangle',
+  insights: 'chart.bar.xaxis',
+  podcasts: 'antenna.radiowaves.left.and.right',
+  save: 'square.and.arrow.down.on.square',
 };

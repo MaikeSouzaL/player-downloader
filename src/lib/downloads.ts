@@ -4,9 +4,10 @@ import { router } from 'expo-router';
 
 import { t } from '@/i18n';
 import { onDownloadScreen } from '@/lib/current-route';
+import { canRetrySave, needsCleanup } from '@/lib/download-jobs';
 import { logError } from '@/lib/errorlog';
 import { errorMessage } from '@/lib/errors';
-import { cancelJob, serverJobId } from '@/lib/grabber';
+import { isActive } from '@/lib/grab-queue-logic';
 import { audioNameFor, classifyLink, extensionOf, fileNameFor, isPageType, mediaTypeOf, playableOnIos, type MediaType } from '@/lib/links';
 import RitmoCore from '@/modules/ritmo-core';
 import { useDownloads, type DownloadAction, type DownloadJob } from '@/store/downloads';
@@ -21,8 +22,8 @@ export type LinkInfo =
   | { kind: 'page' | 'invalid'; url: string };
 
 /**
- * Descobre o que é o link: pergunta ao servidor (HEAD) o tipo, o tamanho e o nome do arquivo.
- * Se o servidor não responder ao HEAD, decide só pela extensão.
+ * Descobre o que é o link: faz um HEAD no próprio link para saber tipo, tamanho e nome do arquivo.
+ * Se o site não responder ao HEAD, decide só pela extensão.
  */
 export async function inspectLink(url: string): Promise<LinkInfo> {
   const first = classifyLink(url);
@@ -67,6 +68,7 @@ const active = (j: DownloadJob) => j.status === 'running';
 
 /** Começa a baixar. `action: 'convert'` baixa o vídeo e transforma em música no fim. */
 export function startDownload(info: Extract<LinkInfo, { kind: 'media' }>, action: DownloadAction, bitrate = 0): string {
+  const before = useDownloads.getState().jobs;
   const id = RitmoCore.startDownload(info.url, info.name, info.mime, info.name);
   useDownloads.getState().add({
     id,
@@ -81,26 +83,10 @@ export function startDownload(info: Extract<LinkInfo, { kind: 'media' }>, action
     total: info.size,
     createdAt: Date.now(),
   });
-  watchDownloads();
-  return id;
-}
-
-/** Baixa um arquivo que o servidor do Ritmo já preparou (vídeo final ou MP3/M4A). */
-export function startUrlDownload(url: string, name: string, mime: string | null, media: MediaType, size = -1): string {
-  const id = RitmoCore.startDownload(url, name, mime, name);
-  useDownloads.getState().add({
-    id,
-    url,
-    name,
-    media,
-    action: 'save',
-    bitrate: 0,
-    status: 'running',
-    progress: 0,
-    bytes: 0,
-    total: size,
-    createdAt: Date.now(),
-  });
+  // A lista tem limite de itens: o mais antigo sai da fila sem passar pela tela. Se ele guardava um
+  // arquivo que não foi salvo, sai junto — senão ficaria no aparelho para sempre.
+  const kept = new Set(useDownloads.getState().jobs.map((j) => j.id));
+  for (const job of before) if (!kept.has(job.id)) cleanupLeftovers(job);
   watchDownloads();
   return id;
 }
@@ -109,7 +95,6 @@ export function cancelDownload(job: DownloadJob) {
   if (job.status === 'converting') RitmoCore.cancelConversion(job.id);
   else RitmoCore.cancelDownload(job.id);
   useDownloads.getState().update(job.id, { status: 'cancelled' });
-  releaseServer(job.url);
 }
 
 /**
@@ -120,16 +105,10 @@ export function cancelDownload(job: DownloadJob) {
 function openInLibrary(media: MediaType) {
   const stillDownloading =
     useDownloads.getState().jobs.some((j) => j.status === 'running' || j.status === 'saving' || j.status === 'converting') ||
-    useGrabQueue.getState().tasks.some((task) => task.status !== 'error');
+    useGrabQueue.getState().tasks.some((task) => isActive(task.status) || task.status === 'ready');
   if (stillDownloading || !onDownloadScreen()) return;
   useUi.getState().setHomeTab(media === 'video' ? 'videos' : 'songs');
   if (router.canDismiss()) router.dismissAll();
-}
-
-/** Arquivo veio do servidor do Ritmo: avisa que acabou, para ele apagar o temporário na hora. */
-function releaseServer(url: string) {
-  const id = serverJobId(url);
-  if (id) void cancelJob(id);
 }
 
 /** Tira da lista de downloads do sistema (e apaga o arquivo baixado, se ainda houver). */
@@ -219,30 +198,111 @@ function tick() {
 
 async function finish(job: DownloadJob, localUri: string, mime: string | null) {
   const { update } = useDownloads.getState();
+  let saved = false;
+  // Cancelamento explícito também é terminal: pode limpar o temporário (não é falha de save).
+  let cancelled = false;
+  let savedName = job.name;
+  let savedMedia: MediaType = job.media;
+  let savedUri: string | undefined;
+  let conversionFallback = false;
+
+  // O arquivo já está no aparelho: guarda o caminho desde já. Se o app morrer no meio do save, a
+  // recuperação na próxima abertura ainda sabe onde ele está — e "Tentar salvar" continua valendo.
   try {
     if (job.action === 'convert') {
-      update(job.id, { status: 'converting', progress: 0 });
-      await RitmoCore.convertToAudio(job.id, localUri, audioNameFor(job.name), job.bitrate);
+      update(job.id, { status: 'converting', progress: 0, pendingUri: localUri, pendingMime: mime });
+      try {
+        await RitmoCore.convertToAudio(job.id, localUri, audioNameFor(job.name), job.bitrate);
+        savedName = audioNameFor(job.name);
+        savedMedia = 'audio';
+      } catch (e) {
+        if ((e as { code?: string })?.code === 'ERR_CANCELLED') throw e;
+        logError('Downloads: converter', e, { ext: extensionOf(job.name) });
+        // A conversão falhou, mas o vídeo baixado está inteiro: salva o vídeo em vez de perdê-lo.
+        update(job.id, { status: 'saving' });
+        try {
+          savedUri = await RitmoCore.saveToLibrary(localUri, job.name, mime ?? null, job.media);
+          savedName = job.name;
+          savedMedia = job.media;
+          conversionFallback = true;
+        } catch (saveError) {
+          logError('Downloads: salvar vídeo após falha na conversão', saveError, { ext: extensionOf(job.name) });
+          // Não apaga nem tira do DownloadManager: o arquivo fica para "Tentar salvar".
+          update(job.id, { status: 'failed', error: errorMessage(saveError) || errorMessage(e), pendingUri: localUri, pendingMime: mime });
+          return;
+        }
+      }
     } else {
-      update(job.id, { status: 'saving' });
-      await RitmoCore.saveToLibrary(localUri, job.name, mime ?? null, job.media);
+      update(job.id, { status: 'saving', pendingUri: localUri, pendingMime: mime });
+      savedUri = await RitmoCore.saveToLibrary(localUri, job.name, mime ?? null, job.media);
+      savedMedia = job.media;
     }
-    update(job.id, { status: 'done', progress: 1 });
-    releaseServer(job.url);
-    useUi.getState().showToast(t('tools.dl.doneToast', { name: job.action === 'convert' ? audioNameFor(job.name) : job.name }));
-    const media: MediaType = job.action === 'convert' ? 'audio' : job.media;
-    void useLibrary.getState().scan().then(() => openInLibrary(media));
+
+    saved = true;
+    update(job.id, { status: 'done', progress: 1, pendingUri: undefined, pendingMime: undefined, savedUri });
+    useUi.getState().showToast(
+      conversionFallback
+        ? t('tools.dl.convertFailedSavedVideo', { name: savedName })
+        : t('tools.dl.doneToast', { name: savedName })
+    );
+    void useLibrary.getState().scan().then(() => openInLibrary(savedMedia));
   } catch (e) {
-    const cancelled = (e as { code?: string })?.code === 'ERR_CANCELLED';
-    if (!cancelled) logError('Downloads: finalizar', e, { ext: extensionOf(job.name) });
-    update(job.id, { status: cancelled ? 'cancelled' : 'failed', error: cancelled ? undefined : errorMessage(e) });
-  } finally {
-    try {
-      RitmoCore.deleteLocalFile(localUri);
-    } catch {
-      // O temporário some com a limpeza do cache do sistema.
+    const wasCancelled = (e as { code?: string })?.code === 'ERR_CANCELLED';
+    if (wasCancelled) {
+      cancelled = true;
+      update(job.id, { status: 'cancelled', error: undefined, pendingUri: undefined, pendingMime: undefined });
+    } else {
+      logError('Downloads: finalizar', e, { ext: extensionOf(job.name) });
+      // Só salvar falhou (o arquivo baixado está inteiro): guarda para "Tentar salvar".
+      update(job.id, { status: 'failed', error: errorMessage(e), pendingUri: localUri, pendingMime: mime });
     }
-    // Tira da lista de downloads do sistema (o arquivo já foi salvo na biblioteca).
-    dropNative(job.id);
+  } finally {
+    // Só limpa quando o arquivo já foi salvo (ou o usuário cancelou). Se o save falhou, o
+    // temporário fica no aparelho para "Tentar salvar" e sai quando o item é removido da lista.
+    if (saved || cancelled) {
+      try {
+        RitmoCore.deleteLocalFile(localUri);
+      } catch {
+        // O temporário some com a limpeza do cache do sistema.
+      }
+      // Tira da lista de downloads do sistema (o arquivo já foi salvo na biblioteca).
+      dropNative(job.id);
+    }
   }
+}
+
+/**
+ * Salvar falhou (ex.: sem espaço) e o arquivo baixado ficou guardado: tenta salvar (ou converter) de novo,
+ * sem baixar outra vez. Lê o estado atual, para dois toques seguidos não salvarem duas cópias.
+ */
+export function retrySave(job: DownloadJob) {
+  const current = useDownloads.getState().jobs.find((j) => j.id === job.id);
+  if (!current || !canRetrySave(current) || !current.pendingUri) return;
+  useDownloads.getState().update(current.id, { error: undefined });
+  void finish(current, current.pendingUri, current.pendingMime ?? null);
+}
+
+/** Apaga o que uma falha ou um cancelamento deixou: o arquivo guardado e o item do gerenciador do sistema. */
+function cleanupLeftovers(job: DownloadJob) {
+  if (!needsCleanup(job)) return;
+  if (job.pendingUri) {
+    try {
+      RitmoCore.deleteLocalFile(job.pendingUri);
+    } catch {
+      // Já não existe.
+    }
+  }
+  dropNative(job.id);
+}
+
+/** Tira da lista; o que ficou baixado e não foi salvo sai junto. */
+export function discardDownload(job: DownloadJob) {
+  cleanupLeftovers(job);
+  useDownloads.getState().remove(job.id);
+}
+
+/** "Limpar" da tela: tira concluídos, falhas e cancelados, apagando o que ficou para trás. */
+export function clearFinishedDownloads() {
+  for (const job of useDownloads.getState().jobs) cleanupLeftovers(job);
+  useDownloads.getState().clearFinished();
 }

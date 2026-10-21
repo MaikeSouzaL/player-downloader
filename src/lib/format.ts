@@ -40,8 +40,12 @@ export function normalize(text: string): string {
   return text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 }
 
+/** Raiz das músicas importadas no iPhone: o caminho continua "Ritmo/…" (os IDs dependem dele), o nome mostrado não. */
+const IOS_ROOT = /^Ritmo(?=\/|$)/;
+
 export function folderName(path: string): string {
   const clean = path.replace(/\/+$/, '');
+  if (clean === 'Ritmo') return 'Player Downloader';
   return clean.slice(clean.lastIndexOf('/') + 1) || clean;
 }
 
@@ -49,6 +53,7 @@ export function folderName(path: string): string {
 /** Caminho legível: "/storage/emulated/0/Music" → "Armazenamento interno/Music". Os rótulos vêm traduzidos de fora. */
 export function prettyPath(path: string, labels: { internal: string; card: (name: string) => string } = DEFAULT_PATH_LABELS): string {
   return path
+    .replace(IOS_ROOT, 'Player Downloader')
     .replace(/^\/storage\/emulated\/0\/?/, `${labels.internal}/`)
     .replace(/^\/storage\/([^/]+)\/?/, (_, name: string) => `${labels.card(name)}/`);
 }

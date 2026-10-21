@@ -3,7 +3,7 @@ const path = require('path');
 const { withDangerousMod, withEntitlementsPlist, withInfoPlist, withXcodeProject } = require('expo/config-plugins');
 
 /**
- * Extensão "Compartilhar" do iPhone (alvo RitmoShare): o Ritmo aparece no menu Compartilhar do
+ * Extensão "Compartilhar" do iPhone (alvo RitmoShare): o Player Downloader aparece no menu Compartilhar do
  * YouTube, Instagram, Safari etc. e abre a tela de escolher vídeo/áudio com o link.
  *
  * O alvo é criado com os mesmos ajudantes do expo-widgets: eles reaproveitam a fase
@@ -101,7 +101,7 @@ module.exports = function withRitmoShareExtension(config, { groupIdentifier } = 
   const deploymentTarget = config.ios?.deploymentTarget ?? '16.4';
   let files = [];
 
-  // O app lê o link guardado pela extensão (quando ela não consegue abrir o Ritmo) neste App Group.
+  // O app lê o link guardado pela extensão (quando ela não consegue abrir o app) neste App Group.
   config = withInfoPlist(config, (cfg) => {
     cfg.modResults.RitmoAppGroup = group;
     return cfg;

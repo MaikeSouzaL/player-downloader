@@ -23,6 +23,11 @@ export type DownloadJob = {
   bytes: number;
   total: number;
   error?: string;
+  /** Caminho do arquivo baixado que ainda não foi salvo: é a cópia que "Tentar salvar" usa. */
+  pendingUri?: string;
+  pendingMime?: string | null;
+  /** Onde ficou salvo na biblioteca (os Podcasts acham a faixa do episódio por aqui). */
+  savedUri?: string;
   createdAt: number;
 };
 

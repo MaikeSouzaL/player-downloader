@@ -1,14 +1,17 @@
 import Slider from '@react-native-community/slider';
 import { Image } from 'expo-image';
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Alert, AppState, Platform, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 
 import { clearBackground, pickBackground } from '@/components/AppBackground';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { Chip } from '@/components/ui/misc';
+import { SettingSwitch } from '@/components/ui/SettingSwitch';
 import { Text } from '@/components/ui/Text';
 import { useT, type StringKey } from '@/i18n';
 import { errorMessage } from '@/lib/errors';
+import RitmoCore from '@/modules/ritmo-core';
 import { useSettings, type ThemePreference } from '@/store/settings';
 import { ACCENTS, radius, space, useColors, useIsDark, type Accent } from '@/theme';
 
@@ -18,12 +21,32 @@ const MODES: { id: ThemePreference; label: StringKey }[] = [
   { id: 'dark', label: 'settings.mode.dark' },
 ];
 
+const canOverlay = () => {
+  try {
+    return RitmoCore.canDrawOverlays?.() ?? false;
+  } catch {
+    return false;
+  }
+};
+
 /** Tema (LPThemeFragment do Lark): claro/escuro, a cor de destaque e a foto de fundo. */
 export default function ThemeScreen() {
   const tr = useT();
   const colors = useColors();
   const isDark = useIsDark();
-  const { theme, accent, background, set } = useSettings();
+  const { theme, accent, background, set, pureBlack, coverColors, haptics, rotation, bubble } = useSettings();
+  // Permissão do balão: confere de novo quando o usuário volta da tela do Android.
+  const [overlayAllowed, setOverlayAllowed] = useState(canOverlay);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') setOverlayAllowed(canOverlay());
+    });
+    return () => sub.remove();
+  }, []);
+  const setBubble = (value: boolean) => {
+    set({ bubble: value });
+    if (value && !canOverlay()) RitmoCore.openOverlayPermission?.();
+  };
   const setBg = (patch: Partial<typeof background>) => set({ background: { ...background, ...patch } });
   const choose = () =>
     pickBackground().catch((e) => Alert.alert(tr('settings.bgError'), errorMessage(e)));
@@ -64,6 +87,29 @@ export default function ThemeScreen() {
             </Pressable>
           );
         })}
+      </View>
+
+      <Text variant="label" muted style={{ marginTop: space.md }}>
+        {tr('extras.theme.title')}
+      </Text>
+      <View style={[styles.bgCard, { backgroundColor: colors.surface, paddingVertical: space.sm }]}>
+        <SettingSwitch title={tr('extras.theme.pureBlack')} hint={tr('extras.theme.pureBlackHint')} value={pureBlack} onValueChange={(v) => set({ pureBlack: v })} />
+        <SettingSwitch title={tr('extras.theme.coverColors')} hint={tr('extras.theme.coverColorsHint')} value={coverColors} onValueChange={(v) => set({ coverColors: v })} />
+        <SettingSwitch title={tr('extras.theme.haptics')} hint={tr('extras.theme.hapticsHint')} value={haptics} onValueChange={(v) => set({ haptics: v })} />
+        <SettingSwitch title={tr('extras.theme.rotation')} hint={tr('extras.theme.rotationHint')} value={rotation} onValueChange={(v) => set({ rotation: v })} />
+        {Platform.OS === 'android' && (
+          <>
+            <SettingSwitch title={tr('extras.bubble.title')} hint={tr('extras.bubble.hint')} value={bubble} onValueChange={setBubble} />
+            {bubble && !overlayAllowed && (
+              <View style={styles.permission}>
+                <Text variant="caption" muted>
+                  {tr('extras.bubble.permissionHint')}
+                </Text>
+                <Button label={tr('extras.bubble.permission')} icon="open_in_new" variant="tonal" compact onPress={() => RitmoCore.openOverlayPermission?.()} />
+              </View>
+            )}
+          </>
+        )}
       </View>
 
       <Text variant="label" muted style={{ marginTop: space.md }}>
@@ -148,6 +194,7 @@ const styles = StyleSheet.create({
   preview: { height: 160, borderRadius: radius.md, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', gap: space.xs },
   previewText: { textShadowColor: 'rgba(0,0,0,0.3)', textShadowRadius: 4 },
   bgButtons: { flexDirection: 'row', gap: space.sm, marginVertical: space.xs },
+  permission: { gap: space.sm, alignItems: 'flex-start', paddingBottom: space.sm },
   switchRow: { flexDirection: 'row', alignItems: 'center', marginTop: space.xs },
   swatch: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
 });

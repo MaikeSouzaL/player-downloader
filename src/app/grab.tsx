@@ -11,16 +11,16 @@ import { useT } from '@/i18n';
 import { logError } from '@/lib/errorlog';
 import { errorMessage } from '@/lib/errors';
 import { formatBytes, formatDuration } from '@/lib/format';
-import { enqueueGrab } from '@/lib/grab-queue';
-import { resolveLink, resolveServer, searchVideos, startJob, type GrabEntry, type GrabFormat, type GrabMedia, type GrabSearchItem } from '@/lib/grabber';
+import { enqueueGrab, releaseGrabKeys, reserveGrabKeys } from '@/lib/grab-queue';
+import { grabKey } from '@/lib/grab-queue-logic';
+import { grabEnabled, resolveLink, searchVideos, startJob, type GrabEntry, type GrabFormat, type GrabMedia, type GrabSearchItem } from '@/lib/grabber';
 import { useGrabHistory } from '@/store/grabHistory';
-import { useSettings } from '@/store/settings';
 import { useUi } from '@/store/ui';
 import { radius, space, useColors } from '@/theme';
 
 type Tab = 'video' | 'audio';
 
-/** Igual ao limite do servidor (RITMO max_batch). */
+/** Limite de vídeos por lote no motor local. */
 const MAX_BATCH = 100;
 
 function hostOf(url: string): string {
@@ -30,6 +30,8 @@ function hostOf(url: string): string {
     return url;
   }
 }
+
+
 
 /** Áudio do melhor para o pior: o original (sem recodificar, bitrate 0) primeiro, depois o MP3 maior. */
 const audioRank = (format: GrabFormat) => (format.bitrate ? format.bitrate : Number.MAX_SAFE_INTEGER);
@@ -41,17 +43,20 @@ function sortFormats(formats: GrabFormat[], tab: Tab): GrabFormat[] {
   );
 }
 
-/** Primeira qualidade que toca neste aparelho (no iPhone, evita VP9/AV1 quando há H.264). */
+/** No iPhone, só aparecem os formatos que o AVFoundation consegue tocar nesta v1. */
+function visibleFormats(media: GrabMedia | null, tab: Tab): GrabFormat[] {
+  const list = tab === 'video' ? (media?.formats ?? []) : (media?.audio ?? []);
+  return Platform.OS === 'ios' ? list.filter((format) => format.compatible !== false) : list;
+}
+
+/** Primeira qualidade que toca neste aparelho (no iPhone, evita VP9/AV1/Opus). */
 function defaultFormat(media: GrabMedia, tab: Tab): string {
-  if (tab === 'audio') return sortFormats(media.audio, 'audio')[0]?.id ?? '';
-  const formats = media.formats;
-  if (Platform.OS === 'ios') return (formats.find((f) => f.compatible !== false) ?? formats[0])?.id ?? '';
-  return formats[0]?.id ?? '';
+  return sortFormats(visibleFormats(media, tab), tab)[0]?.id ?? '';
 }
 
 /**
- * "Baixar de um site" (o fluxo do SnapTube): lê o link no servidor do Ritmo, mostra as
- * qualidades de vídeo, os formatos de áudio e as legendas, e manda para a fila do servidor.
+ * "Baixar de um site" (o fluxo do SnapTube): lê o link no próprio aparelho, mostra as
+ * qualidades de vídeo, os formatos de áudio e as legendas, e manda para a fila local.
  * Playlists: escolhe os vídeos e baixa todos de uma vez.
  */
 export default function GrabScreen() {
@@ -60,9 +65,8 @@ export default function GrabScreen() {
   const params = useLocalSearchParams<{ url?: string }>();
   const initial = typeof params.url === 'string' ? params.url : '';
   const recents = useGrabHistory((s) => s.recents);
-  // Assina o endereço: salvar o servidor em Ajustes e voltar já libera a tela.
-  const server = useSettings((s) => s.grabServer);
-  const enabled = /^https?:\/\/[^/]+/i.test(resolveServer(server, '').url);
+  // O motor local só existe nos builds nativos (yt-dlp/Python embutidos no Android e no iPhone).
+  const enabled = grabEnabled();
 
   const [link, setLink] = useState(initial);
   const [mode, setMode] = useState<'link' | 'search'>('link');
@@ -77,63 +81,110 @@ export default function GrabScreen() {
   const [selected, setSelected] = useState<string[]>([]);
   const [reading, setReading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [warming, setWarming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const alive = useRef(true);
+  // Uma leitura/busca por vez manda no resultado: a antiga não sobrescreve a nova.
+  const opSeq = useRef(0);
+  const busyOp = useRef<{ kind: 'read' | 'search'; target: string } | null>(null);
+  const sendingRef = useRef(false);
+  const warmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const startWarming = useCallback(() => {
+    if (warmTimer.current) clearTimeout(warmTimer.current);
+    setWarming(false);
+    warmTimer.current = setTimeout(() => {
+      if (alive.current) setWarming(true);
+    }, 5000);
+  }, []);
+
+  const stopWarming = useCallback(() => {
+    if (warmTimer.current) {
+      clearTimeout(warmTimer.current);
+      warmTimer.current = null;
+    }
+    if (alive.current) setWarming(false);
+  }, []);
 
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
+      if (warmTimer.current) clearTimeout(warmTimer.current);
     };
   }, []);
 
   const read = useCallback(
     async (value?: string, playlist = false) => {
       const target = (value ?? link).trim();
-      if (!target || reading) return;
+      if (!target) return;
+      if (busyOp.current?.kind === 'read' && busyOp.current.target === target) return;
+      const seq = ++opSeq.current;
+      busyOp.current = { kind: 'read', target };
       setReading(true);
+      setSearching(false);
       setError(null);
       setMedia(null);
+      startWarming();
       try {
         const found = await resolveLink(target, playlist);
-        if (!alive.current) return;
+        if (!alive.current || seq !== opSeq.current) return;
         if (!playlist) setLink(target);
         setMedia(found);
         useGrabHistory.getState().add({ url: found.url || target, title: found.title, thumbnail: found.thumbnail });
-        const first: Tab = found.formats.length ? 'video' : 'audio';
+        const first: Tab = visibleFormats(found, 'video').length ? 'video' : 'audio';
         setTab(first);
         setPicked(defaultFormat(found, first));
         setSubtitle(null);
         setSelected(found.playlist?.entries.slice(0, MAX_BATCH).map((entry) => entry.id) ?? []);
       } catch (e) {
-        if (alive.current) setError(errorMessage(e) || tr('tools.grab.unsupported'));
+        if (alive.current && seq === opSeq.current) setError(errorMessage(e) || tr('tools.grab.unsupported'));
       } finally {
-        if (alive.current) setReading(false);
+        if (seq === opSeq.current) {
+          busyOp.current = null;
+          stopWarming();
+          if (alive.current) {
+            setReading(false);
+            setSearching(false);
+          }
+        }
       }
     },
-    [link, reading, tr]
+    [link, tr, startWarming, stopWarming]
   );
 
   const search = useCallback(async () => {
     const term = query.trim();
-    if (term.length < 2 || searching) return;
+    if (term.length < 2) return;
+    if (busyOp.current?.kind === 'search' && busyOp.current.target === term) return;
+    const seq = ++opSeq.current;
+    busyOp.current = { kind: 'search', target: term };
     setSearching(true);
+    setReading(false);
     setError(null);
     setMedia(null);
     setResults([]);
     setSearched(false);
+    startWarming();
     try {
       const found = await searchVideos(term);
-      if (alive.current) {
+      if (alive.current && seq === opSeq.current) {
         setResults(found.items);
         setSearched(true);
       }
     } catch (e) {
-      if (alive.current) setError(errorMessage(e) || tr('tools.grab.failed'));
+      if (alive.current && seq === opSeq.current) setError(errorMessage(e) || tr('tools.grab.failed'));
     } finally {
-      if (alive.current) setSearching(false);
+      if (seq === opSeq.current) {
+        busyOp.current = null;
+        stopWarming();
+        if (alive.current) {
+          setSearching(false);
+          setReading(false);
+        }
+      }
     }
-  }, [query, searching, tr]);
+  }, [query, tr, startWarming, stopWarming]);
 
   const pickResult = (item: GrabSearchItem) => {
     setMode('link');
@@ -144,6 +195,12 @@ export default function GrabScreen() {
 
   const switchMode = (next: 'link' | 'search') => {
     if (next === mode) return;
+    // A operação antiga (leitura ou busca) não pode mais pintar a tela depois da troca.
+    opSeq.current++;
+    busyOp.current = null;
+    stopWarming();
+    setReading(false);
+    setSearching(false);
     setMode(next);
     setError(null);
     if (next === 'search') {
@@ -153,7 +210,7 @@ export default function GrabScreen() {
     }
   };
 
-  // Link veio do "Compartilhar com o Ritmo" ou do navegador: já lê sozinho (no próximo tick,
+  // Link veio do "Compartilhar com o Player Downloader" ou do navegador: já lê sozinho (no próximo tick,
   // para não disparar renders em cascata dentro do efeito). Com a tela já aberta, um link novo
   // (outro vídeo compartilhado no iPhone) também é lido.
   const lastInitial = useRef('');
@@ -183,27 +240,61 @@ export default function GrabScreen() {
   const allSelected = entries.length > 0 && entries.slice(0, MAX_BATCH).every((entry) => selected.includes(entry.id));
 
   const start = async () => {
-    if (!media || !picked || sending) return;
-    const chosen = isPlaylist ? entries.filter((entry) => selected.includes(entry.id)).map((entry) => entry.id) : undefined;
-    if (chosen && chosen.length === 0) {
+    if (!media || !picked || sendingRef.current) return;
+    const chosenVideos = isPlaylist ? entries.filter((entry) => selected.includes(entry.id)) : undefined;
+    if (chosenVideos && chosenVideos.length === 0) {
       setError(tr('tools.grab.pickSome'));
       return;
     }
-    if (chosen && chosen.length > MAX_BATCH) {
+    if (chosenVideos && chosenVideos.length > MAX_BATCH) {
       setError(tr('tools.grab.batchLimit', { n: MAX_BATCH }));
       return;
     }
+
+    const subtitles = tab === 'video' ? subtitle : null;
+    const targets = chosenVideos?.length
+      ? chosenVideos.map((entry) => ({ id: entry.id, url: entry.url }))
+      : [{ id: '', url: media.url || link.trim() }];
+    // Reserva antes do await: o segundo toque (ou Enter) não chama o motor de novo.
+    const keys = targets.map((target) =>
+      grabKey({ url: target.url, entryId: target.id, formatId: picked, kind: tab, subtitles })
+    );
+    if (!reserveGrabKeys(keys)) {
+      useUi.getState().showToast(tr('tools.grab.alreadyQueued'));
+      router.push('/downloads');
+      return;
+    }
+
+    sendingRef.current = true;
     setSending(true);
     setError(null);
     try {
-      const started = await startJob(media.token, picked, { subtitles: tab === 'video' ? subtitle : null, entries: chosen });
-      enqueueGrab(started, media.title, tab);
-      useUi.getState().showToast(tr.n('tools.grab.sent', started.ids.length));
-      router.push('/downloads');
+      const selectedFormat = (tab === 'video' ? media.formats : media.audio).find((format) => format.id === picked);
+      const started = await startJob(media.url, picked, {
+        subtitles,
+        videos: chosenVideos,
+        hasAudio: selectedFormat?.hasAudio,
+        title: media.title,
+        kind: tab,
+      });
+      const added = enqueueGrab(started, media.title, tab, {
+        url: media.url || link.trim(),
+        formatId: picked,
+        kind: tab,
+        hasAudio: !!selectedFormat?.hasAudio,
+        subtitles,
+        entries: targets,
+      });
+      if (alive.current) {
+        useUi.getState().showToast(added > 0 ? tr.n('tools.grab.sent', added) : tr('tools.grab.alreadyQueued'));
+        router.push('/downloads');
+      }
     } catch (e) {
       logError('Baixar de um site', e, { site: hostOf(media.url) });
       if (alive.current) setError(errorMessage(e) || tr('tools.grab.failed'));
     } finally {
+      releaseGrabKeys(keys);
+      sendingRef.current = false;
       if (alive.current) setSending(false);
     }
   };
@@ -215,17 +306,17 @@ export default function GrabScreen() {
       <View style={{ flex: 1 }}>
         {header}
         <EmptyState
-          icon="cloud_download"
-          title={tr('tools.grab.server')}
-          message={tr('tools.grab.hint')}
-          action={<Button label={tr('common.settings')} icon="settings" onPress={() => router.push('/settings/grab')} />}
+          icon="cloud_off"
+          title={tr('tools.grab.androidOnly')}
+          message={tr('tools.grab.androidOnlyText')}
         />
       </View>
     );
   }
 
-  const formats = sortFormats(tab === 'video' ? (media?.formats ?? []) : (media?.audio ?? []), tab);
-  const subtitles = tab === 'video' ? (media?.subtitles ?? []) : [];
+  const formats = sortFormats(visibleFormats(media, tab), tab);
+  // Legendas, MP3, 4K e VP9/AV1 ficam para a fase 2 no iPhone.
+  const subtitles = tab === 'video' && Platform.OS !== 'ios' ? (media?.subtitles ?? []) : [];
 
   return (
     <View style={{ flex: 1 }}>
@@ -289,7 +380,14 @@ export default function GrabScreen() {
         {(searching || reading) && (
           <View style={styles.loading}>
             <ActivityIndicator color={colors.primary} />
-            <Text muted>{searching ? tr('tools.grab.searching') : tr('tools.grab.reading')}</Text>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text muted>{searching ? tr('tools.grab.searching') : tr('tools.grab.reading')}</Text>
+              {warming && (
+                <Text variant="caption" muted>
+                  {tr('tools.grab.firstRun')}
+                </Text>
+              )}
+            </View>
           </View>
         )}
 
@@ -321,9 +419,21 @@ export default function GrabScreen() {
         {error && (
           <View style={[styles.warning, { backgroundColor: colors.surface }]}>
             <Icon name="error" color={colors.danger} />
-            <Text style={{ flex: 1 }} color={colors.danger}>
-              {error}
-            </Text>
+            <View style={{ flex: 1, gap: space.sm }}>
+              <Text color={colors.danger}>{error}</Text>
+              <Button
+                label={tr('common.retry')}
+                icon="refresh"
+                variant="tonal"
+                compact
+                onPress={() => {
+                  if (media && picked) void start();
+                  else if (mode === 'search') void search();
+                  else void read();
+                }}
+                style={{ alignSelf: 'flex-start' }}
+              />
+            </View>
           </View>
         )}
 
@@ -360,6 +470,11 @@ export default function GrabScreen() {
             <Text variant="caption" muted>
               {tab === 'video' ? (isPlaylist ? tr('tools.grab.playlistQuality') : tr('tools.grab.videoHint')) : tr('tools.grab.audioHint')}
             </Text>
+            {Platform.OS === 'ios' && (
+              <Text variant="caption" muted>
+                {tr('tools.grab.iosFormats')}
+              </Text>
+            )}
 
             {formats.length === 0 ? (
               <Text muted>{tab === 'video' ? tr('tools.grab.noVideo') : tr('tools.grab.noAudio')}</Text>

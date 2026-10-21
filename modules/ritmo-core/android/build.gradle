@@ -6,6 +6,10 @@ plugins {
 group = 'expo.modules.ritmocore'
 version = '0.1.0'
 
+repositories {
+  mavenCentral()
+}
+
 android {
   namespace "expo.modules.ritmocore"
   defaultConfig {
@@ -26,6 +30,11 @@ dependencies {
   implementation "androidx.media3:media3-datasource:${media3Version}"
   // Converter vídeo em áudio (extrai/recodifica a faixa de áudio para AAC/M4A).
   implementation "androidx.media3:media3-transformer:${media3Version}"
+
+  // yt-dlp + Python + FFmpeg + QuickJS embutidos: o download do YouTube acontece no aparelho,
+  // pela conexão do usuário, sem servidor/cookies. Fork mantido pelo time do Seal.
+  implementation "io.github.junkfood02.youtubedl-android:library:0.18.1"
+  implementation "io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1"
 
   testImplementation 'junit:junit:4.13.2'
   // org.json de verdade nos testes da JVM (o do android.jar é só "stub").

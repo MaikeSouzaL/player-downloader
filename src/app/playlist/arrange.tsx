@@ -9,6 +9,7 @@ import { Icon } from '@/components/ui/Icon';
 import { EmptyState } from '@/components/ui/misc';
 import { Text } from '@/components/ui/Text';
 import { useT } from '@/i18n';
+import { haptic } from '@/lib/haptics';
 import type { Track } from '@/lib/library';
 import { useCollections } from '@/store/collections';
 import { useLibrary } from '@/store/library';
@@ -19,7 +20,12 @@ const Row = memo(function Row({ track, onRemove }: { track: Track; onRemove: () 
   const colors = useColors();
   const drag = useReorderableDrag();
   return (
-    <Pressable onLongPress={drag} delayLongPress={200} style={[styles.row, { backgroundColor: colors.background }]}>
+    <Pressable
+      onLongPress={() => {
+        haptic('drag');
+        drag();
+      }}
+      delayLongPress={200} style={[styles.row, { backgroundColor: colors.background }]}>
       <Artwork track={track} size={44} radius={6} />
       <View style={{ flex: 1 }}>
         <Text variant="label" numberOfLines={1}>

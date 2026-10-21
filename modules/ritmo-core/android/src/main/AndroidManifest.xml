@@ -1,7 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
   <uses-permission android:name="android.permission.WAKE_LOCK" />
+  <!-- Balão flutuante por cima dos outros apps (o usuário libera em Ajustes; dá para desligar no app). -->
+  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
   <application>
     <!-- Android Auto: o app aparece como app de música no carro (navegação + busca por voz). -->
@@ -41,5 +44,11 @@
         android:name="android.appwidget.provider"
         android:resource="@xml/ritmo_widget_info" />
     </receiver>
+
+    <!-- Download do yt-dlp no próprio aparelho, inclusive com a tela apagada. -->
+    <service
+      android:name="expo.modules.ritmocore.GrabService"
+      android:exported="false"
+      android:foregroundServiceType="dataSync" />
   </application>
 </manifest>

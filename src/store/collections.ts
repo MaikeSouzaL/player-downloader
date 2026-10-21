@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 
 import { t } from '@/i18n';
 import { mergeValidated } from '@/lib/merge';
+import { keepRecentMonths, monthKey } from '@/lib/recap';
 import { persistStorage } from '@/store/storage';
 
 export type Playlist = { id: string; name: string; trackIds: string[]; createdAt: number; updatedAt: number };
@@ -15,6 +16,8 @@ type CollectionsState = {
   plays: Record<string, number>;
   /** Tempo ouvido por dia (AAAA-MM-DD → ms), para "Tempo de reprodução". */
   playTime: Record<string, number>;
+  /** Vezes tocada por mês (AAAA-MM → ID da faixa → vezes), para a Retrospectiva. */
+  monthPlays: Record<string, Record<string, number>>;
   createPlaylist: (name: string, trackIds?: string[]) => string;
   renamePlaylist: (id: string, name: string) => void;
   deletePlaylist: (id: string) => void;
@@ -32,6 +35,8 @@ export const dayKey = (d: Date = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 const RECENT_LIMIT = 100;
+/** Dois anos de Retrospectiva. */
+const MONTHS_LIMIT = 24;
 
 export const useCollections = create<CollectionsState>()(
   persist(
@@ -45,6 +50,7 @@ export const useCollections = create<CollectionsState>()(
         recent: [],
         plays: {},
         playTime: {},
+        monthPlays: {},
 
         createPlaylist: (name, trackIds = []) => {
           const id = `pl_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -82,12 +88,16 @@ export const useCollections = create<CollectionsState>()(
         recordPlay: (trackId) => {
           // Pasta privada não deixa rastro em Recentes nem em Mais tocadas.
           if (trackId.startsWith('v:')) return;
+          const month = monthKey();
+          const months = get().monthPlays;
+          const bucket = months[month] ?? {};
           set({
             recent: [trackId, ...get().recent.filter((r) => r !== trackId)].slice(0, RECENT_LIMIT),
             plays: { ...get().plays, [trackId]: (get().plays[trackId] ?? 0) + 1 },
+            monthPlays: keepRecentMonths({ ...months, [month]: { ...bucket, [trackId]: (bucket[trackId] ?? 0) + 1 } }, MONTHS_LIMIT),
           });
         },
-        clearHistory: () => set({ recent: [], plays: {} }),
+        clearHistory: () => set({ recent: [], plays: {}, monthPlays: {} }),
         addPlayTime: (ms) => {
           const key = dayKey();
           set({ playTime: { ...get().playTime, [key]: (get().playTime[key] ?? 0) + ms } });

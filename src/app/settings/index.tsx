@@ -76,6 +76,7 @@ export default function SettingsScreen() {
           onPress={() => router.push('/settings/play-time')}
           right={chevron}
         />
+        <ListItem icon="insights" title={tr('extras.stats.title')} subtitle={tr('extras.stats.subtitle')} onPress={() => router.push('/recap')} right={chevron} />
         <ListItem icon="palette" title={tr('settings.theme')} subtitle={themeLabel} onPress={() => router.push('/settings/theme')} right={chevron} />
         <ListItem icon="language" title={tr('settings.language')} subtitle={languageLabel} onPress={() => setPickingLanguage(true)} right={chevron} />
         <ListItem
@@ -106,14 +107,17 @@ export default function SettingsScreen() {
           onPress={() => router.push('/settings/hidden')}
           right={chevron}
         />
+        <ListItem icon="podcasts" title={tr('extras.podcast.title')} subtitle={tr('extras.podcast.subtitle')} onPress={() => router.push('/podcasts')} right={chevron} />
         <ListItem icon="download" title={tr('tools.dl.title')} subtitle={tr('tools.dl.subtitle')} onPress={() => router.push('/downloads')} right={chevron} />
-        <ListItem
-          icon="cloud_download"
-          title={tr('tools.grab.server')}
-          subtitle={tr('tools.grab.serverSub')}
-          onPress={() => router.push('/settings/grab')}
-          right={chevron}
-        />
+        {IS_IOS && (
+          <ListItem
+            icon="system_update"
+            title={tr('settings.grabEngine')}
+            subtitle={tr('settings.grabEngineSub')}
+            onPress={() => router.push('/settings/grab')}
+            right={chevron}
+          />
+        )}
         <ListItem icon="lock" title={tr('tools.vault.title')} subtitle={tr('tools.vault.subtitle')} onPress={() => router.push('/vault')} right={chevron} />
         <ListItem icon="settings_backup_restore" title={tr('settings.backup')} subtitle={tr('settings.backupSub')} onPress={() => router.push('/settings/backup')} right={chevron} />
         <ListItem icon="tune" title={tr('settings.playback')} onPress={() => router.push('/settings/playback')} right={chevron} />

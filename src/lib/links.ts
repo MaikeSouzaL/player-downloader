@@ -1,6 +1,6 @@
 /**
  * Classificação de links recebidos pelo "Compartilhar" ou colados em Downloads.
- * O Ritmo só baixa arquivos de mídia diretos (um .mp3, um .mp4, o arquivo de um podcast…).
+ * O Player Downloader só baixa arquivos de mídia diretos (um .mp3, um .mp4, o arquivo de um podcast…).
  * Serviços de streaming e redes sociais protegem os arquivos e não permitem baixar: ficam de fora.
  */
 

@@ -11,7 +11,7 @@
     "ios": {
       "icon": "./assets/expo.icon",
       "bundleIdentifier": "com.ritmo.player",
-      "buildNumber": "5",
+      "buildNumber": "6",
       "deploymentTarget": "16.4",
       "supportsTablet": true,
       "infoPlist": {

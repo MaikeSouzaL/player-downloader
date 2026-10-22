@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useVideoPlayer, VideoView, type VideoPlayer } from 'expo-video';
 import { useEffect, useRef, useState } from 'react';
 import { Animated, AppState, Easing, StyleSheet } from 'react-native';
+import { create } from 'zustand';
 
 import { logError } from '@/lib/errorlog';
 
@@ -20,6 +21,18 @@ const MAX_MS = 10000;
 
 /** O Android pode recriar a tela com o app já aberto (memória, idioma, fonte): aí a abertura não volta. */
 let shown = false;
+
+const useSplash = create<{ started: boolean }>(() => ({ started: false }));
+
+/**
+ * A abertura já está na tela (a do sistema saiu e o vídeo começou). Até aqui o layout raiz desenha só ela,
+ * para a tela laranja do sistema sair o quanto antes; o resto do app monta depois, por baixo da animação.
+ */
+export function markSplashStarted() {
+  useSplash.setState({ started: true });
+}
+
+export const useSplashStarted = () => useSplash((s) => s.started);
 
 // O player é um objeto nativo mutável; as alterações ficam fora do componente (regra do React Compiler).
 const startVideo = (p: VideoPlayer) => p.play();
@@ -88,9 +101,11 @@ function SplashVideo({ onDone }: { onDone: () => void }) {
     if (player.status === 'error') {
       logError('Abertura', 'O vídeo de abertura não abriu');
       setEnded(true);
-      return;
+    } else {
+      startVideo(player);
     }
-    startVideo(player);
+    // O vídeo toca no nativo; a montagem pesada das telas (JS) pode começar agora.
+    markSplashStarted();
   };
 
   // O vídeo fica visível desde já: o próprio expo-video só mostra a imagem a partir do primeiro quadro

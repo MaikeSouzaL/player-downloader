@@ -6,7 +6,7 @@ import { Appearance, AppState, StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { AnimatedSplash } from '@/components/AnimatedSplash';
+import { AnimatedSplash, markSplashStarted, useSplashStarted } from '@/components/AnimatedSplash';
 import { PlaylistPicker } from '@/components/PlaylistPicker';
 import { Toast } from '@/components/Toast';
 import { TrackMenu } from '@/components/TrackMenu';
@@ -45,6 +45,15 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 // A tela do sistema sai de uma vez: o fade padrão (0,4 s) cobriria o começo do vídeo de abertura.
 SplashScreen.setOptions({ duration: 0, fade: false });
 installGlobalErrorLogging();
+
+// As telas montam só depois de a abertura aparecer (assim a tela do sistema sai antes); quem navega
+// sozinho no começo (Compartilhar, boas-vindas) espera por elas.
+let screensMounted: () => void = () => {};
+const screensReady = new Promise<void>((resolve) => {
+  screensMounted = resolve;
+});
+/** Se a abertura não chegar a aparecer, as telas montam assim mesmo. */
+const SCREENS_FALLBACK_MS = 3000;
 
 /** Tela de erro no lugar de uma tela branca; o erro vai para o Registro de erros. */
 export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
@@ -94,8 +103,10 @@ function useBootstrap() {
         ]);
         // Crash nativo da última abertura entra no registro local de erros.
         if (alive) stopReports = startErrorReporting();
-        // Algo chegou pelo "Compartilhar" / "Abrir com"? Abre já, sem esperar a varredura da biblioteca.
-        if (alive) stopShare = startShareListener();
+        // Algo chegou pelo "Compartilhar" / "Abrir com"? Abre assim que as telas existirem, sem esperar a varredura.
+        screensReady.then(() => {
+          if (alive) stopShare = startShareListener();
+        });
         const library = useLibrary.getState();
         granted = await library.checkPermission();
         if (granted) await library.scan();
@@ -104,7 +115,10 @@ function useBootstrap() {
         await SplashScreen.hideAsync().catch(() => {});
       }
       // Primeira abertura: explica as permissões antes de pedir.
-      if (alive && !useSettings.getState().onboarded && (!granted || IS_IOS)) router.push('/welcome');
+      if (alive && !useSettings.getState().onboarded && (!granted || IS_IOS)) {
+        await screensReady;
+        if (alive) router.push('/welcome');
+      }
       if (alive) {
         stopBrowseSync = syncBrowseData();
         stopWidgetSync = startWidgetSync();
@@ -177,6 +191,14 @@ export default function RootLayout() {
     }
   }, [bubble]);
   useBootstrap();
+  const showScreens = useSplashStarted();
+  useEffect(() => {
+    const timer = setTimeout(markSplashStarted, SCREENS_FALLBACK_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  useEffect(() => {
+    if (showScreens) screensMounted();
+  }, [showScreens]);
 
   const isDark = useIsDark();
   const colors = useColors();
@@ -194,51 +216,54 @@ export default function RootLayout() {
         <ThemeProvider value={navTheme}>
           <StatusBar style={isDark ? 'light' : 'dark'} />
           <View style={{ flex: 1, backgroundColor: colors.background }}>
-            <Stack
-              screenOptions={{
-                headerShadowVisible: false,
-                headerStyle: { backgroundColor: colors.surface },
-                headerTintColor: colors.text,
-                headerTitleStyle: { fontSize: 18, fontWeight: '600' },
-                contentStyle: { backgroundColor: colors.background },
-                animation: 'slide_from_right',
-              }}>
-              <Stack.Screen name="index" options={{ headerShown: false }} />
-              <Stack.Screen name="player" options={{ headerShown: false, animation: 'slide_from_bottom', contentStyle: { backgroundColor: colors.playerBackground } }} />
-              <Stack.Screen name="queue" options={{ headerShown: false, presentation: 'transparentModal', animation: 'slide_from_bottom', contentStyle: { backgroundColor: 'transparent' } }} />
-              <Stack.Screen name="equalizer" options={{ headerShown: false, presentation: 'transparentModal', animation: 'slide_from_bottom', contentStyle: { backgroundColor: 'transparent' } }} />
-              <Stack.Screen name="sleep-timer" options={{ headerShown: false, presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />
-              <Stack.Screen name="search" options={{ headerShown: false }} />
-              <Stack.Screen name="select" options={{ headerShown: false }} />
-              <Stack.Screen name="album/[id]" options={{ title: '' }} />
-              <Stack.Screen name="artist/[id]" options={{ title: '' }} />
-              <Stack.Screen name="folder" options={{ title: '' }} />
-              <Stack.Screen name="playlist/[id]" options={{ title: '' }} />
-              <Stack.Screen name="lyrics-edit/[id]" options={{ title: tr('settings.screen.lyrics') }} />
-              <Stack.Screen name="video-folder" options={{ title: '' }} />
-              <Stack.Screen name="video/[id]" options={{ headerShown: false, animation: 'fade', contentStyle: { backgroundColor: '#000' } }} />
-              <Stack.Screen name="settings/index" options={{ title: tr('common.settings') }} />
-              <Stack.Screen name="settings/theme" options={{ title: tr('settings.theme') }} />
-              <Stack.Screen name="settings/hidden" options={{ title: tr('settings.hidden') }} />
-              <Stack.Screen name="settings/playback" options={{ title: tr('settings.playback') }} />
-              <Stack.Screen name="settings/play-time" options={{ title: tr('settings.playTime') }} />
-              <Stack.Screen name="settings/errors" options={{ title: tr('settings.errors') }} />
-              <Stack.Screen name="settings/trash" options={{ title: tr('settings.trash') }} />
-              <Stack.Screen name="settings/backup" options={{ title: tr('settings.backup') }} />
-              <Stack.Screen name="settings/grab" options={{ title: tr('settings.grabEngine') }} />
-              <Stack.Screen name="share" options={{ title: tr('tools.share.title'), presentation: 'modal' }} />
-              <Stack.Screen name="downloads" options={{ title: tr('tools.dl.title') }} />
-              <Stack.Screen name="recap" options={{ title: tr('extras.stats.title') }} />
-              <Stack.Screen name="podcasts/index" options={{ title: tr('extras.podcast.title') }} />
-              <Stack.Screen name="podcasts/[id]" options={{ title: '' }} />
-              <Stack.Screen name="grab" options={{ title: tr('tools.grab.title') }} />
-              <Stack.Screen name="browser" options={{ headerShown: false }} />
-
-              <Stack.Screen name="vault" options={{ title: tr('tools.vault.title') }} />
-              <Stack.Screen name="edit/[id]" options={{ title: tr('settings.screen.editInfo') }} />
-              <Stack.Screen name="playlist/arrange" options={{ title: tr('settings.screen.arrange') }} />
-              <Stack.Screen name="welcome" options={{ headerShown: false, animation: 'fade' }} />
-            </Stack>
+            {/* Montadas depois de a abertura aparecer (veja screensReady). */}
+            {showScreens && (
+              <Stack
+                screenOptions={{
+                  headerShadowVisible: false,
+                  headerStyle: { backgroundColor: colors.surface },
+                  headerTintColor: colors.text,
+                  headerTitleStyle: { fontSize: 18, fontWeight: '600' },
+                  contentStyle: { backgroundColor: colors.background },
+                  animation: 'slide_from_right',
+                }}>
+                <Stack.Screen name="index" options={{ headerShown: false }} />
+                <Stack.Screen name="player" options={{ headerShown: false, animation: 'slide_from_bottom', contentStyle: { backgroundColor: colors.playerBackground } }} />
+                <Stack.Screen name="queue" options={{ headerShown: false, presentation: 'transparentModal', animation: 'slide_from_bottom', contentStyle: { backgroundColor: 'transparent' } }} />
+                <Stack.Screen name="equalizer" options={{ headerShown: false, presentation: 'transparentModal', animation: 'slide_from_bottom', contentStyle: { backgroundColor: 'transparent' } }} />
+                <Stack.Screen name="sleep-timer" options={{ headerShown: false, presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />
+                <Stack.Screen name="search" options={{ headerShown: false }} />
+                <Stack.Screen name="select" options={{ headerShown: false }} />
+                <Stack.Screen name="album/[id]" options={{ title: '' }} />
+                <Stack.Screen name="artist/[id]" options={{ title: '' }} />
+                <Stack.Screen name="folder" options={{ title: '' }} />
+                <Stack.Screen name="playlist/[id]" options={{ title: '' }} />
+                <Stack.Screen name="lyrics-edit/[id]" options={{ title: tr('settings.screen.lyrics') }} />
+                <Stack.Screen name="video-folder" options={{ title: '' }} />
+                <Stack.Screen name="video/[id]" options={{ headerShown: false, animation: 'fade', contentStyle: { backgroundColor: '#000' } }} />
+                <Stack.Screen name="settings/index" options={{ title: tr('common.settings') }} />
+                <Stack.Screen name="settings/theme" options={{ title: tr('settings.theme') }} />
+                <Stack.Screen name="settings/hidden" options={{ title: tr('settings.hidden') }} />
+                <Stack.Screen name="settings/playback" options={{ title: tr('settings.playback') }} />
+                <Stack.Screen name="settings/play-time" options={{ title: tr('settings.playTime') }} />
+                <Stack.Screen name="settings/errors" options={{ title: tr('settings.errors') }} />
+                <Stack.Screen name="settings/trash" options={{ title: tr('settings.trash') }} />
+                <Stack.Screen name="settings/backup" options={{ title: tr('settings.backup') }} />
+                <Stack.Screen name="settings/grab" options={{ title: tr('settings.grabEngine') }} />
+                <Stack.Screen name="share" options={{ title: tr('tools.share.title'), presentation: 'modal' }} />
+                <Stack.Screen name="downloads" options={{ title: tr('tools.dl.title') }} />
+                <Stack.Screen name="recap" options={{ title: tr('extras.stats.title') }} />
+                <Stack.Screen name="podcasts/index" options={{ title: tr('extras.podcast.title') }} />
+                <Stack.Screen name="podcasts/[id]" options={{ title: '' }} />
+                <Stack.Screen name="grab" options={{ title: tr('tools.grab.title') }} />
+                <Stack.Screen name="browser" options={{ headerShown: false }} />
+  
+                <Stack.Screen name="vault" options={{ title: tr('tools.vault.title') }} />
+                <Stack.Screen name="edit/[id]" options={{ title: tr('settings.screen.editInfo') }} />
+                <Stack.Screen name="playlist/arrange" options={{ title: tr('settings.screen.arrange') }} />
+                <Stack.Screen name="welcome" options={{ headerShown: false, animation: 'fade' }} />
+              </Stack>
+            )}
             <RouteTracker />
             <TrackMenu />
             <PlaylistPicker />

@@ -160,7 +160,8 @@ export default function RootLayout() {
   const tr = useT();
   const theme = useSettings((s) => s.theme);
   useEffect(() => {
-    Appearance.setColorScheme(theme === 'system' ? 'unspecified' : theme);
+    // Na web (testes no navegador) não existe: o tema segue o do navegador.
+    Appearance.setColorScheme?.(theme === 'system' ? 'unspecified' : theme);
   }, [theme]);
   const rotation = useSettings((s) => s.rotation);
   useEffect(() => {

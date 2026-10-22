@@ -3,8 +3,10 @@ import { PermissionsAndroid, Platform, type Permission } from 'react-native';
 import RitmoCore from '@/modules/ritmo-core';
 
 const sdk = Platform.OS === 'android' ? (Platform.Version as number) : 0;
-const AUDIO = sdk >= 33 ? PermissionsAndroid.PERMISSIONS.READ_MEDIA_AUDIO : PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
-const VIDEO = sdk >= 33 ? PermissionsAndroid.PERMISSIONS.READ_MEDIA_VIDEO : PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
+// Na web (app aberto no navegador para testes) o PermissionsAndroid nem existe.
+const P = (PermissionsAndroid as typeof PermissionsAndroid | undefined)?.PERMISSIONS ?? ({} as typeof PermissionsAndroid.PERMISSIONS);
+const AUDIO = sdk >= 33 ? P.READ_MEDIA_AUDIO : P.READ_EXTERNAL_STORAGE;
+const VIDEO = sdk >= 33 ? P.READ_MEDIA_VIDEO : P.READ_EXTERNAL_STORAGE;
 
 // No iPhone as músicas importadas ficam na pasta do próprio app (sem permissão); só o app Música pede acesso.
 export async function hasAudioPermission(): Promise<boolean> {

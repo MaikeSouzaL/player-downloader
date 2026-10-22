@@ -65,6 +65,8 @@ export function logError(source: string, error: unknown, extra?: Record<string, 
     err.stack ? err.stack.split('\n').slice(1, 6).map((l) => `  ${l.trim()}`).join('\n') : null,
   ].filter(Boolean);
   const entry = `${lines.join('\n')}\n`;
+  // Em desenvolvimento (e no navegador, onde não há arquivo) o erro também aparece no console.
+  if (__DEV__) console.warn(entry);
   // Gravações em fila para não se atropelarem; falha ao gravar o log nunca derruba o app.
   queue = queue
     .then(async () => {

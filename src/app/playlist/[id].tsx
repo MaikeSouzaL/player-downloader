@@ -35,23 +35,27 @@ export default function PlaylistScreen() {
 
   if (!smart && !playlist) return <EmptyState icon="queue_music" title={tr('library.playlist.notFound')} />;
 
-  const remove = () =>
-    Alert.alert(tr('library.playlist.deleteTitle', { name: playlist!.name }), tr('library.playlist.deleteMessage'), [
+  // Nada de "playlist!." dentro das funções: o React Compiler lê essas propriedades já no render e
+  // derrubava as playlists automáticas (Recentes, Curtidas, Mais tocadas), que não têm `playlist`.
+  const remove = () => {
+    if (!playlist) return;
+    Alert.alert(tr('library.playlist.deleteTitle', { name: playlist.name }), tr('library.playlist.deleteMessage'), [
       { text: tr('common.cancel'), style: 'cancel' },
       {
         text: tr('common.delete'),
         style: 'destructive',
         onPress: () => {
-          useCollections.getState().deletePlaylist(playlist!.id);
+          useCollections.getState().deletePlaylist(playlist.id);
           router.back();
         },
       },
     ]);
+  };
 
   return (
     <>
       <TrackListScreen
-        title={smart ? tr(smart.title) : playlist!.name}
+        title={smart ? tr(smart.title) : (playlist?.name ?? '')}
         tracks={tracks}
         cover={smart ? undefined : tracks[0]}
         coverNode={
@@ -114,7 +118,7 @@ export default function PlaylistScreen() {
             <Button
               label={tr('common.save')}
               onPress={() => {
-                useCollections.getState().renamePlaylist(playlist!.id, name);
+                if (playlist) useCollections.getState().renamePlaylist(playlist.id, name);
                 setRenaming(false);
               }}
             />
